@@ -18,13 +18,19 @@ returns ``200`` with a report whose ``reachable`` is ``false`` and ``grade`` is
 
 from __future__ import annotations
 
-from urllib.parse import urlparse
+from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, field_validator
 
 from core import __version__ as core_version
 from core.report import evaluate
+from core.validation import validate_mcp_url
+
+# The browser-facing demo UI is a single self-contained file served same-origin,
+# so the page can call POST /evaluate without any CORS configuration.
+WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
 app = FastAPI(
     title="Agent QA",
@@ -45,20 +51,19 @@ class EvaluateRequest(BaseModel):
     @field_validator("endpoint_url")
     @classmethod
     def _must_be_http_url(cls, value: str) -> str:
-        value = value.strip()
-        parsed = urlparse(value)
-        if parsed.scheme not in ("http", "https") or not parsed.netloc:
-            raise ValueError(
-                "endpoint_url must be an absolute http(s) URL, "
-                f"got: {value!r}"
-            )
-        return value
+        return validate_mcp_url(value)
 
 
 class HealthResponse(BaseModel):
     status: str = "ok"
     service: str = "agent-qa"
     version: str = core_version
+
+
+@app.get("/", include_in_schema=False)
+async def index() -> FileResponse:
+    """Serve the browser-facing demo UI (the Reliability Bench)."""
+    return FileResponse(WEB_DIR / "index.html")
 
 
 @app.get("/health", response_model=HealthResponse, tags=["meta"])
@@ -83,4 +88,4 @@ def run() -> None:
     """Run the service with uvicorn (``agent-qa-serve`` / ``python -m service``)."""
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=8080)
+    uvicorn.run(app, host="0.0.0.0", port=9090)
