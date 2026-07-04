@@ -68,8 +68,13 @@ POST /evaluate
 
 It returns the full report as JSON. `GET /health` returns a liveness check. `GET /` serves the browser interface.
 
+### As an MCP tool
+
+The service is also an MCP server. It exposes one tool, `evaluate_mcp_endpoint`, with a single `endpoint_url` parameter, and returns the same report. Any MCP client or AI agent can call it. This is how the service is listed on OKX.AI.
+
 ## Status
 
 - Core engine. Done. Five checks, each unit tested against a known-good and a known-bad case, and verified against a live server.
 - HTTP service and browser interface. Done.
-- Next. Package as an MCP tool, deploy behind HTTPS, and list on OKX.AI.
+- MCP server. Done. Exposes `evaluate_mcp_endpoint` through FastMCP, so any AI can call it. Pointed at itself, it scores a perfect A, which means it passes its own checks.
+- Next. Deploy behind HTTPS on one domain, then list on OKX.AI.
