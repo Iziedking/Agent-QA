@@ -599,7 +599,7 @@ agent-qa https://your-server.example/mcp <span class="fl">--json</span> &gt; rep
   function band(s) { return s >= 90 ? "a" : s >= 80 ? "b" : s >= 70 ? "c" : s >= 60 ? "d" : "f"; }
   function el(t, c, txt) { var e = document.createElement(t); if (c) e.className = c; if (txt != null) e.textContent = txt; return e; }
 
-  /* ---- optional click/tick audio (mirrors the reference's mute toggle) ---- */
+  /* ---- audio: mirrors avow's beep.ts readout and its telemetry blip ---- */
   var audioOn = false, ac = null;
   var soundBtn = $("soundToggle");
   soundBtn.addEventListener("click", function () {
@@ -607,44 +607,82 @@ agent-qa https://your-server.example/mcp <span class="fl">--json</span> &gt; rep
     soundBtn.textContent = audioOn ? "SOUND ON" : "SOUND OFF";
     soundBtn.setAttribute("aria-pressed", audioOn ? "true" : "false");
     if (audioOn && !ac) { try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { ac = null; } }
+    if (ac && ac.state === "suspended") ac.resume();
   });
-  // A clean computerized "bip": a short sine tone with a fast attack and decay,
-  // like a digital countdown, not a buzzy square wave.
-  function bip(freq, vol, dur) {
+
+  // One short square-wave blip, the step-readout tone. Pitch rises per step so it
+  // reads like a line being spoken. (avow beep.ts: square, 8ms attack, 110ms decay.)
+  function beep(freq) {
     if (!audioOn || !ac) return;
     try {
-      var t = ac.currentTime;
-      freq = freq || 840; vol = vol || 0.05; dur = dur || 0.05;
-      var o = ac.createOscillator(), g = ac.createGain();
-      o.type = "sine";
-      o.frequency.setValueAtTime(freq, t);
-      g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(vol, t + 0.004);   // fast attack, no click
-      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);  // fast decay
-      o.connect(g); g.connect(ac.destination);
-      o.start(t); o.stop(t + dur + 0.02);
+      var osc = ac.createOscillator(), gain = ac.createGain(), t = ac.currentTime;
+      osc.type = "square";
+      osc.frequency.value = freq || 880;
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(0.05, t + 0.008);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.11);
+      osc.connect(gain); gain.connect(ac.destination);
+      osc.start(t); osc.stop(t + 0.13);
     } catch (e) {}
   }
-  // A quieter, lower blip for the data stream during the scan.
-  function dataBip() { bip(600, 0.02, 0.022); }
 
-  /* ---- digit counter: counts up like a computerized readout ---- */
-  function countTo(node, target, dur, sound) {
+  // A short low telemetry blip (sine), randomized so it reads like data, for the scan.
+  function dataBlip() {
+    if (!audioOn || !ac) return;
+    try {
+      var osc = ac.createOscillator(), gain = ac.createGain(), t = ac.currentTime;
+      osc.type = "sine";
+      osc.frequency.value = 520 + Math.random() * 680;
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(0.045, t + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
+      osc.connect(gain); gain.connect(ac.destination);
+      osc.start(t); osc.stop(t + 0.14);
+    } catch (e) {}
+  }
+
+  // A clean ascending two-note confirmation tone (avow confirmTone), on the grade.
+  function confirmTone() {
+    if (!audioOn || !ac) return;
+    try {
+      [[528, 0], [792, 0.16]].forEach(function (p) {
+        var osc = ac.createOscillator(), gain = ac.createGain(), t = ac.currentTime + p[1];
+        osc.type = "sine";
+        osc.frequency.value = p[0];
+        gain.gain.setValueAtTime(0.0001, t);
+        gain.gain.exponentialRampToValueAtTime(0.14, t + 0.03);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.7);
+        osc.connect(gain); gain.connect(ac.destination);
+        osc.start(t); osc.stop(t + 0.75);
+      });
+    } catch (e) {}
+  }
+
+  // Read out the report: one rising beep per category as the bars fill, then a
+  // confirm tone as the grade lands. Spaced so each blip is a distinct step.
+  var readoutTimers = [];
+  function readout(steps) {
+    readoutTimers.forEach(clearTimeout); readoutTimers = [];
+    if (!audioOn) return;
+    for (var i = 0; i < steps; i++) {
+      (function (n) {
+        readoutTimers.push(setTimeout(function () { beep(740 + n * 90); }, n * 150));
+      })(i);
+    }
+    readoutTimers.push(setTimeout(confirmTone, steps * 150 + 130));
+  }
+
+  /* ---- digit counter: visual only, counts up like a computerized readout ---- */
+  function countTo(node, target, dur) {
     target = Math.round(target || 0);
     if (reduceMotion) { node.textContent = target; return; }
-    var start = performance.now(), from = 0, last = -1, lastBip = 0;
+    var start = performance.now(), from = 0, last = -1;
     function step(now) {
       var p = Math.min(1, (now - start) / dur);
       var e = 1 - Math.pow(1 - p, 3);           // ease-out cubic
       var v = Math.round(from + (target - from) * e);
-      if (v !== last) {
-        node.textContent = v;
-        // Throttle so it reads as a countdown, not a solid tone.
-        if (sound && v !== target && now - lastBip > 42) { bip(820, 0.05, 0.05); lastBip = now; }
-        last = v;
-      }
+      if (v !== last) { node.textContent = v; last = v; }
       if (p < 1) requestAnimationFrame(step);
-      else if (sound) bip(1046, 0.06, 0.09);    // higher confirm bip on landing
     }
     requestAnimationFrame(step);
   }
@@ -703,12 +741,12 @@ agent-qa https://your-server.example/mcp <span class="fl">--json</span> &gt; rep
     var i = 0; scanStep.textContent = SCAN_STEPS[0];
     scanTimer = setInterval(function () { i = (i + 1) % SCAN_STEPS.length; scanStep.textContent = SCAN_STEPS[i]; }, 620);
     if (!reduceMotion) {
-      var lines = [];
+      var lines = [], blipN = 0;
       hexTimer = setInterval(function () {
         lines.push(randHexLine()); if (lines.length > 7) lines.shift();
         stream.textContent = lines.join("\n");
         pct = Math.min(97, pct + Math.random() * 9); scanPct.textContent = ("0" + Math.floor(pct)).slice(-2) + "%";
-        dataBip();
+        if ((blipN++ % 3) === 0) dataBlip();   // sparse telemetry, not a solid tone
       }, 90);
     }
   }
@@ -749,11 +787,13 @@ agent-qa https://your-server.example/mcp <span class="fl">--json</span> &gt; rep
 
   function render(rep) {
     setStatus(rep.reachable ? "ok · grade " + rep.grade : "unreachable", !rep.reachable);
+    // Read out one rising beep per category as the bars fill, then a confirm tone.
+    readout(Object.keys(rep.category_scores || {}).length);
     var b = band(rep.overall_score || 0);
     var seal = $("seal"); seal.className = "seal grade-" + b;
     var lt = $("gradeLetter"); lt.textContent = rep.grade || "?";
     lt.style.animation = "none"; void lt.offsetWidth; lt.style.animation = "";
-    countTo($("scoreVal"), rep.overall_score || 0, 900, true);
+    countTo($("scoreVal"), rep.overall_score || 0, 900);
     var reach = $("reach");
     reach.className = "reach " + (rep.reachable ? "ok" : "no");
     reach.textContent = rep.reachable ? "● reachable" : "● unreachable";
@@ -769,7 +809,7 @@ agent-qa https://your-server.example/mcp <span class="fl">--json</span> &gt; rep
       g.appendChild(row);
       var track = el("div", "track"); var fill = el("div", "fill grade-" + cb); track.appendChild(fill); g.appendChild(track);
       gl.appendChild(g);
-      countTo(v, score, 850, false);
+      countTo(v, score, 850);
       requestAnimationFrame(function () { requestAnimationFrame(function () { fill.style.width = Math.max(2, score) + "%"; }); });
     });
 
