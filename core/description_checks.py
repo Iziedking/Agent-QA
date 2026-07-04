@@ -1,4 +1,4 @@
-"""Check 5 — Description quality.
+"""Check 5: description quality.
 
 Scores whether an AI orchestrator could *pick* and *call* a tool correctly from
 its declared metadata alone. This is heuristic, so the rubric is written out here

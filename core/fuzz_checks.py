@@ -1,9 +1,9 @@
-"""Check 3 — Malformed-input handling (strictly read-only).
+"""Check 3: malformed-input handling (strictly read-only).
 
 For each tool we send inputs that violate the tool's *own* declared schema:
 missing required fields and wrong-typed values. A reliable server rejects these
-cleanly — either a structured protocol error (JSON-RPC ``-32602 Invalid
-params``) or a ``CallToolResult`` with ``isError=True`` — without crashing and
+cleanly, either a structured protocol error (JSON-RPC ``-32602 Invalid
+params``) or a ``CallToolResult`` with ``isError=True``, without crashing and
 without silently running as if the input were valid.
 
 Safety model

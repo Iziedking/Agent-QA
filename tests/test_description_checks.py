@@ -1,4 +1,4 @@
-"""Tests for core.description_checks — the documented heuristic rubric."""
+"""Tests for core.description_checks: the documented heuristic rubric."""
 
 from core.description_checks import score_tool_description
 

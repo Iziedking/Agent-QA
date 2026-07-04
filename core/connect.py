@@ -1,4 +1,4 @@
-"""Check 1 — Connection & handshake, plus the shared session opener.
+"""Check 1: connection and handshake, plus the shared session opener.
 
 Opens a real MCP client session against a target URL using the official SDK, so
 Agent QA speaks the actual protocol rather than guessing at HTTP shapes. Modern

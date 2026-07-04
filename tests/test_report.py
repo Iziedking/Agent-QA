@@ -1,4 +1,4 @@
-"""Tests for core.report — grading, assembly, and end-to-end evaluate()."""
+"""Tests for core.report: grading, assembly, and end-to-end evaluate()."""
 
 import contextlib
 

@@ -1,4 +1,4 @@
-"""Tests for core.schema_checks — known-good and known-bad schemas."""
+"""Tests for core.schema_checks: known-good and known-bad schemas."""
 
 from core.schema_checks import check_tool_schema
 

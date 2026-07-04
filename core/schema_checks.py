@@ -1,11 +1,11 @@
-"""Check 2 — Schema validity.
+"""Check 2: schema validity.
 
 For each listed tool, confirm its declared input schema is a well-formed JSON
 Schema object with sanely declared properties and required fields. A tool that
 declares no schema, or an invalid one, is a real failure: it breaks AI callers
 that rely on the schema to construct arguments.
 
-The core function :func:`check_tool_schema` is pure — it takes a normalized tool
+The core function :func:`check_tool_schema` is pure. It takes a normalized tool
 dict and returns a :class:`CheckResult`, so it can be unit-tested with hand-built
 known-good and known-bad inputs, no live server required.
 """

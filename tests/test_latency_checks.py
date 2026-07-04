@@ -1,4 +1,4 @@
-"""Tests for core.latency_checks — percentiles, grading, and the async probe."""
+"""Tests for core.latency_checks: percentiles, grading, and the async probe."""
 
 import pytest
 

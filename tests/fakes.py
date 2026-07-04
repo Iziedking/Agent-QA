@@ -1,7 +1,7 @@
 """In-memory fakes so the async orchestration is tested without a live server.
 
 These stand in for a real MCP ``ClientSession``. Each fake exposes just the two
-async methods the engine calls — ``list_tools`` and ``call_tool`` — with
+async methods the engine calls, ``list_tools`` and ``call_tool``, with
 configurable behavior so we can simulate clean errors, crashes, and servers that
 wrongly accept invalid input.
 """

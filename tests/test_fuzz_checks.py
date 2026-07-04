@@ -1,4 +1,4 @@
-"""Tests for core.fuzz_checks — generation, classification, and the async probe."""
+"""Tests for core.fuzz_checks: generation, classification, and the async probe."""
 
 from core.fuzz_checks import (
     classify_call_outcome,

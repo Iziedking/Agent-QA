@@ -1,4 +1,4 @@
-"""Check 4 — Latency under repetition.
+"""Check 4: latency under repetition.
 
 Times repeated round-trips to the server and reports p50 / p95. Slow or wildly
 variable latency is a reliability signal AI orchestrators care about: a tool that
@@ -6,8 +6,8 @@ usually answers in 100 ms but occasionally takes 8 s will stall agent pipelines.
 
 To stay strictly read-only (never triggering a tool's business logic or side
 effects) the probe times ``list_tools()`` round-trips. That still exercises the
-full request/response path — transport, framing, serialization, the server's
-request handler — without invoking any listed tool.
+full request and response path (transport, framing, serialization, the server's
+request handler) without invoking any listed tool.
 
 The math (:func:`compute_percentiles`) and the grading (:func:`grade_latency`)
 are pure and unit-tested. :func:`run_latency_check` is the thin async wrapper
