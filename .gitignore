@@ -7,6 +7,13 @@ notes/
 scratch/
 *.internal.md
 
+# ---- Internal runbook and runtime data (never commit) ----
+# The Docker and Caddy config files ARE tracked; they are project infrastructure.
+# Only the internal step-by-step runbook and Caddy's generated data stay out.
+deploy.md
+caddy_data/
+caddy_config/
+
 # ---- Python ----
 __pycache__/
 *.py[cod]
