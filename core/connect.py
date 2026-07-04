@@ -27,22 +27,39 @@ from .models import CATEGORY_CONNECTION, CheckResult
 DEFAULT_TIMEOUT = 15.0
 
 
+def _normalize_annotations(ann: Any) -> dict[str, Any] | None:
+    """Return tool annotations as a plain dict, or None."""
+    if ann is None:
+        return None
+    if isinstance(ann, dict):
+        return ann
+    if hasattr(ann, "model_dump"):
+        try:
+            return ann.model_dump()
+        except Exception:  # noqa: BLE001 - annotations are advisory, never fatal
+            return None
+    return None
+
+
 def tool_to_dict(tool: Any) -> dict[str, Any]:
     """Normalize an SDK ``Tool`` (or already-dict) into a plain dict.
 
-    The pure checks consume ``{"name", "description", "inputSchema"}``; this is
-    the single adapter between the live SDK objects and that shape.
+    The pure checks consume ``{"name", "description", "inputSchema"}``, and the
+    fuzz check also reads ``annotations`` to respect a server's own hints. This
+    is the single adapter between the live SDK objects and that shape.
     """
     if isinstance(tool, dict):
         return {
             "name": tool.get("name"),
             "description": tool.get("description"),
             "inputSchema": tool.get("inputSchema"),
+            "annotations": _normalize_annotations(tool.get("annotations")),
         }
     return {
         "name": getattr(tool, "name", None),
         "description": getattr(tool, "description", None),
         "inputSchema": getattr(tool, "inputSchema", None),
+        "annotations": _normalize_annotations(getattr(tool, "annotations", None)),
     }
 
 
@@ -67,40 +84,70 @@ async def open_mcp_session(
     )
 
     for label, factory in transports:
+        stack = AsyncExitStack()
         try:
-            async with AsyncExitStack() as stack:
-                streams = await stack.enter_async_context(factory())
-                # Streamable HTTP yields a 3-tuple (read, write, get_session_id);
-                # SSE yields a 2-tuple (read, write). Take the first two.
-                read_stream, write_stream = streams[0], streams[1]
-                session = await stack.enter_async_context(
-                    ClientSession(read_stream, write_stream)
-                )
-                await session.initialize()
-                yield session, label
-                return
-        except Exception as exc:  # noqa: BLE001 - collect and try next transport
+            streams = await stack.enter_async_context(factory())
+            # Streamable HTTP yields a 3-tuple (read, write, get_session_id);
+            # SSE yields a 2-tuple (read, write). Take the first two.
+            read_stream, write_stream = streams[0], streams[1]
+            session = await stack.enter_async_context(
+                ClientSession(read_stream, write_stream)
+            )
+            await session.initialize()
+        except Exception as exc:  # noqa: BLE001 - connection failure, try next transport
             errors.append(f"{label}: {type(exc).__name__}: {exc}")
+            await _safe_aclose(stack)
             continue
 
+        # Connected. Yield OUTSIDE the connect try/except, so an exception raised
+        # by the caller's body (for example a mid-session list_tools failure)
+        # propagates unchanged instead of being mistaken for a connection error
+        # and triggering a spurious second transport attempt.
+        try:
+            yield session, label
+        finally:
+            await _safe_aclose(stack)
+        return
+
     raise ConnectionError(
-        "Could not open an MCP session on any transport. "
-        + " | ".join(errors)
+        "Could not open an MCP session on any transport. " + " | ".join(errors)
     )
 
 
-def connection_success_result(transport: str, tool_count: int) -> CheckResult:
-    """Build the passing connection CheckResult after a successful handshake."""
+async def _safe_aclose(stack: AsyncExitStack) -> None:
+    """Close an exit stack, swallowing cleanup errors so they cannot mask the
+    real result being returned or raised."""
+    try:
+        await stack.aclose()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def connection_success_result(
+    transport: str, tool_count: int, evaluated: int | None = None
+) -> CheckResult:
+    """Build the passing connection CheckResult after a successful handshake.
+
+    ``evaluated`` is how many tools were actually checked, which is lower than
+    ``tool_count`` when a server lists more tools than the per-run cap.
+    """
+    note = (
+        f"Handshake succeeded over {transport}; "
+        f"server listed {tool_count} tool(s)."
+    )
+    if evaluated is not None and evaluated < tool_count:
+        note += f" Evaluated the first {evaluated} (capped)."
     return CheckResult(
         category=CATEGORY_CONNECTION,
         name="handshake",
         passed=True,
         score=100.0,
-        note=(
-            f"Handshake succeeded over {transport}; "
-            f"server listed {tool_count} tool(s)."
-        ),
-        details={"transport": transport, "tool_count": tool_count},
+        note=note,
+        details={
+            "transport": transport,
+            "tool_count": tool_count,
+            "evaluated": evaluated if evaluated is not None else tool_count,
+        },
     )
 
 
