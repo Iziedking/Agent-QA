@@ -49,8 +49,9 @@ async def evaluate_mcp_endpoint(
     connection and handshake, schema validity, malformed input handling,
     latency measured as p50 and p95, and description quality. It returns a
     report with a score per category, a per-tool breakdown, an overall letter
-    grade from A to F, and the top issues found. The probe is read-only and
-    never sends input designed to cause a side effect on the target server.
+    grade from A to F, and the top issues found. The probe is read-only: it
+    sends only inputs a correct server rejects before doing any work, so it does
+    not exercise a tool's side-effecting paths.
     """
     url = validate_mcp_url(endpoint_url)
     report = await evaluate(url)

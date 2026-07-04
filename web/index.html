@@ -386,7 +386,7 @@
         <div class="sec-label">Evaluate an endpoint</div>
         <div class="sec-desc">
           Paste a public MCP endpoint URL. Agent QA opens a real protocol session and runs a
-          read-only probe. It only sends input a correct server rejects, so it never triggers a side effect.
+          read-only probe. It sends only input a correct server rejects before doing any work.
         </div>
 
         <form id="form" autocomplete="off">
@@ -399,7 +399,7 @@
         </form>
         <div class="demo">
           <span class="lbl">or try:</span>
-          <button type="button" class="chip" data-url="http://127.0.0.1:8000/mcp">local test server</button>
+          <button type="button" class="chip" id="selfChip" data-url="">grade this service</button>
         </div>
 
         <div class="scan ticks" id="scan" aria-live="polite">
@@ -563,7 +563,7 @@ agent-qa https://your-server.example/mcp <span class="fl">--json</span> &gt; rep
           <section data-sec="faq">
             <h2>FAQ</h2>
             <div class="faq-q">Is it safe to point at a server I do not own?</div>
-            <p>Yes. Every check is read-only. The malformed input probe only sends input that a correct server rejects before it does any work, so it never triggers a real action. Tools that take no arguments are skipped rather than probed, so there is nothing to send.</p>
+            <p>It is built to be. Every check is read-only. The malformed input probe sends only input that a correct server rejects before it does any work, and no payload carries a full set of valid-looking values. Tools that take no arguments, and tools the server marks destructive, are skipped rather than probed.</p>
             <div class="faq-q">What does an F mean?</div>
             <p>A score below 60, or an endpoint that could not be reached. Treat it as not ready to depend on yet.</p>
             <div class="faq-q">Why grade descriptions at all?</div>
@@ -639,6 +639,11 @@ agent-qa https://your-server.example/mcp <span class="fl">--json</span> &gt; rep
     $("led").classList.add("live");
     $("statusText").textContent = "live v" + (d.version || "?");
   }).catch(function () { $("statusText").textContent = "offline"; });
+
+  // The demo chip grades this very service, so it works on the live site out of
+  // the box. On a private origin the SSRF guard will refuse it, which is correct.
+  var selfChip = $("selfChip");
+  if (selfChip) selfChip.dataset.url = location.origin + "/mcp";
 
   document.querySelectorAll(".chip").forEach(function (c) {
     c.addEventListener("click", function () { urlInput.value = c.getAttribute("data-url"); urlInput.focus(); });
