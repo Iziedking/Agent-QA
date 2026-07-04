@@ -1,0 +1,31 @@
+# Two services on one host: the app container and Caddy in front of it.
+# Caddy is the only service exposed to the internet. It terminates HTTPS and
+# forwards to the app over the internal network, so the app never speaks TLS
+# and never publishes a port to the host.
+
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    # No "ports" here on purpose. Only Caddy reaches the app, over the internal
+    # network at app:9090.
+    expose:
+      - "9090"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"   # HTTP/3
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+
+volumes:
+  caddy_data:
+  caddy_config:

@@ -1,0 +1,15 @@
+# Caddy sits in front of the app container and gives us HTTPS with no manual
+# certificate work. It fetches and renews a free certificate for the domain on
+# its own, then forwards plain HTTP to the app on the internal Docker network.
+#
+# Change the domain below if you deploy under a different name. To receive
+# certificate expiry notices, set an email with a global `email` directive or
+# the ACME_EMAIL environment variable; it is intentionally left out here.
+
+agentsqa.xyz {
+	# "app" is the service name from docker-compose.yml, reachable on the
+	# internal network. 9090 is the port the container listens on.
+	reverse_proxy app:9090
+
+	encode gzip zstd
+}
