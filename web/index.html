@@ -345,11 +345,101 @@
   .faq-q { font-family: var(--sans); font-weight: 600; font-size: 16px; color: var(--text); margin: 22px 0 6px; }
   .faq-q:first-child { margin-top: 0; }
 
+  /* ---------------------------- Boot intro --------------------------- */
+  /* NOTE: class is .boot, not .intro, because .intro is already the hero
+     section class (which caps max-width at 62ch and would shrink this). */
+  .boot {
+    position: fixed; inset: 0; z-index: 1000;
+    width: 100vw; height: 100vh;
+    background: #050607; color: var(--text);
+    font-family: var(--mono);
+    display: flex; align-items: center; justify-content: center; overflow: hidden;
+    transition: opacity 0.8s ease;
+  }
+  .boot.is-leaving { opacity: 0; pointer-events: none; }
+  .crt {
+    position: relative; width: min(880px, 92vw); height: min(540px, 80vh);
+    padding: clamp(20px, 5vw, 52px);
+    display: flex; flex-direction: column;
+    border: 1px solid var(--line-bright);
+    background:
+      radial-gradient(120% 120% at 50% 50%, rgba(174,183,189,0.04), transparent 60%),
+      #0a0c0e;
+    box-shadow: inset 0 0 120px rgba(0,0,0,0.9), inset 0 0 40px rgba(174,183,189,0.04);
+    animation: crtFlicker 6s infinite steps(1);
+  }
+  .crt::before {
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    background: repeating-linear-gradient(0deg, rgba(0,0,0,0) 0 2px, rgba(0,0,0,0.16) 3px);
+    mix-blend-mode: multiply; animation: scanDrift 9s linear infinite;
+  }
+  .crt::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    background: radial-gradient(110% 110% at 50% 45%, transparent 55%, rgba(0,0,0,0.85) 100%);
+  }
+  .crt > * { position: relative; z-index: 1; }
+  @keyframes crtFlicker { 0%,100%{opacity:1} 8%{opacity:.97} 8.5%{opacity:1} 44%{opacity:.98} 44.4%{opacity:1} }
+  @keyframes scanDrift { from{background-position-y:0} to{background-position-y:100px} }
+
+  .crt-bar {
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase;
+    color: var(--faint); border-bottom: 1px solid var(--line); padding-bottom: 12px; margin-bottom: auto;
+  }
+  .crt-body { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 14px; text-align: center; }
+  .i-glow { text-shadow: 0 0 6px var(--glow), 0 0 16px rgba(174,183,189,0.35); }
+  .i-headline { font-family: var(--digital); font-weight: 700; font-size: clamp(22px, 3.6vw, 40px); letter-spacing: 0.02em; line-height: 1.15; }
+  .i-headline b { color: var(--accent); font-weight: 700; }
+  .i-aberrate { text-shadow: -0.6px 0 rgba(255,80,120,0.28), 0.6px 0 rgba(90,190,255,0.28), 0 0 10px var(--glow); }
+  .i-sys { font-size: clamp(13px, 1.6vw, 16px); letter-spacing: 0.06em; color: var(--text); }
+  .i-sys .dim { color: var(--faint); }
+  .i-cursor::after { content: "▋"; margin-left: 4px; animation: iblink 1s steps(1) infinite; }
+  @keyframes iblink { 50% { opacity: 0; } }
+  .i-hex { height: 120px; overflow: hidden; font-size: 12px; line-height: 1.5; color: var(--accent-dim); text-align: left; }
+  .i-hex div { white-space: nowrap; }
+  .i-globe { width: clamp(120px, 22vw, 170px); height: clamp(120px, 22vw, 170px); margin: 0 auto; }
+  .i-globe svg { width: 100%; height: 100%; animation: ispin 18s linear infinite; }
+  .i-globe .node { animation: inode 1.6s ease-in-out infinite; }
+  @keyframes ispin { to { transform: rotateZ(360deg); } }
+  @keyframes inode { 0%,100%{opacity:.3} 50%{opacity:1} }
+  .i-ticks { display: flex; gap: 4px; justify-content: center; }
+  .i-ticks span { width: 14px; height: 6px; background: var(--line-bright); }
+  .i-ticks span.on { background: var(--accent); box-shadow: 0 0 8px var(--glow); }
+  .i-confirm { font-family: var(--digital); font-weight: 600; font-size: clamp(20px, 3.2vw, 32px); color: #fff; letter-spacing: 0.02em; animation: iconfirm 1.1s ease-out; }
+  @keyframes iconfirm { 0%{text-shadow:0 0 0 rgba(255,255,255,0)} 40%{text-shadow:0 0 18px rgba(255,255,255,0.6), 0 0 44px var(--glow)} 100%{text-shadow:0 0 6px var(--glow)} }
+  .gate { display: flex; flex-direction: column; align-items: center; gap: 18px; }
+  .gate-sub { font-size: 12px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--faint); }
+  .gate-btn {
+    background: transparent; border: 1px solid var(--accent); color: var(--accent);
+    font-family: var(--mono); font-size: 14px; letter-spacing: 0.22em; text-transform: uppercase;
+    padding: 14px 28px; cursor: pointer; transition: background 0.2s ease;
+  }
+  .gate-btn:hover { background: rgba(174,183,189,0.08); }
+  .launch-btn { margin-top: 26px; }
+  .intro-controls { display: flex; gap: 12px; justify-content: flex-end; margin-top: auto; padding-top: 12px; }
+  .intro-controls button {
+    background: var(--inset); border: 1px solid var(--line); color: var(--dim);
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase;
+    padding: 7px 12px; cursor: pointer;
+  }
+  .intro-controls button:hover { color: var(--accent); border-color: var(--accent-dim); }
+
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   @media (prefers-reduced-motion: reduce) { *{ animation: none !important; transition: none !important; } .fill{transition:none} }
 </style>
 </head>
 <body>
+  <div class="boot" id="intro" role="dialog" aria-label="Agent QA boot sequence">
+    <div class="crt">
+      <div class="crt-bar"><span>AGENT·QA · reliability bench</span><span id="introStatus">standby</span></div>
+      <div class="crt-body" id="introBody"></div>
+      <div class="intro-controls">
+        <button id="introMute" type="button">mute</button>
+        <button id="introSkip" type="button" style="display:none">skip</button>
+      </div>
+    </div>
+  </div>
+
   <div class="watermark l" aria-hidden="true">Q</div>
   <div class="watermark r" aria-hidden="true">A</div>
 
@@ -602,13 +692,14 @@ agent-qa https://your-server.example/mcp <span class="fl">--json</span> &gt; rep
   /* ---- audio: mirrors avow's beep.ts readout and its telemetry blip ---- */
   var audioOn = false, ac = null;
   var soundBtn = $("soundToggle");
-  soundBtn.addEventListener("click", function () {
-    audioOn = !audioOn;
-    soundBtn.textContent = audioOn ? "SOUND ON" : "SOUND OFF";
-    soundBtn.setAttribute("aria-pressed", audioOn ? "true" : "false");
-    if (audioOn && !ac) { try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { ac = null; } }
-    if (ac && ac.state === "suspended") ac.resume();
-  });
+  function applyAudio(on) {
+    audioOn = on;
+    soundBtn.textContent = on ? "SOUND ON" : "SOUND OFF";
+    soundBtn.setAttribute("aria-pressed", on ? "true" : "false");
+    if (on && !ac) { try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { ac = null; } }
+    if (on && ac && ac.state === "suspended") ac.resume();
+  }
+  soundBtn.addEventListener("click", function () { applyAudio(!audioOn); });
 
   // One short square-wave blip, the step-readout tone. Pitch rises per step so it
   // reads like a line being spoken. (avow beep.ts: square, 8ms attack, 110ms decay.)
@@ -847,6 +938,116 @@ agent-qa https://your-server.example/mcp <span class="fl">--json</span> &gt; rep
     report.classList.add("on");
     report.scrollIntoView({ behavior: "smooth", block: "start" });
   }
+
+  /* ---------------------------- Boot intro --------------------------- */
+  // Mirrors avow's Intro.tsx: a gated boot sequence that lands on the bench.
+  (function initIntro() {
+    var intro = $("intro"), body = $("introBody"), statusEl = $("introStatus");
+    var muteBtn = $("introMute"), skipBtn = $("introSkip");
+    var HEXCH = "0123456789abcdef";
+    function randHex(n) { var s = ""; for (var i = 0; i < n; i++) s += HEXCH[(Math.random() * 16) | 0]; return s; }
+
+    // Skip for reduced motion, or on repeat visits unless ?intro is present.
+    var force = new URLSearchParams(location.search).has("intro");
+    var seen = false; try { seen = localStorage.getItem("agentqa_seen_intro") === "1"; } catch (e) {}
+    if (reduceMotion || (seen && !force)) { if (intro) intro.remove(); return; }
+
+    var timers = [];
+    function clearTimers() { timers.forEach(function (t) { clearTimeout(t); clearInterval(t); }); timers = []; }
+
+    var STATUS = { gate: "standby", power: "online", init: "link", probe: "probe", verify: "score", confirm: "ok", resolve: "ok" };
+    var ORDER = ["power", "init", "probe", "verify", "confirm", "resolve"];
+
+    function globeSVG() {
+      return '<div class="i-globe"><svg viewBox="0 0 200 200" fill="none">'
+        + '<circle cx="100" cy="100" r="80" stroke="var(--accent-dim)" stroke-width="1"/>'
+        + '<ellipse cx="100" cy="100" rx="80" ry="30" stroke="var(--accent-dim)" stroke-width="1"/>'
+        + '<ellipse cx="100" cy="100" rx="80" ry="55" stroke="var(--line-bright)" stroke-width="1"/>'
+        + '<ellipse cx="100" cy="100" rx="30" ry="80" stroke="var(--accent-dim)" stroke-width="1"/>'
+        + '<ellipse cx="100" cy="100" rx="55" ry="80" stroke="var(--line-bright)" stroke-width="1"/>'
+        + '<circle class="node" cx="150" cy="70" r="3" fill="var(--accent)"/>'
+        + '<circle class="node" cx="62" cy="132" r="3" fill="var(--accent)"/></svg></div>';
+    }
+
+    var hexLines = [], tickCount = 0;
+    function pushHex() {
+      hexLines.push(randHex(48)); if (hexLines.length > 7) hexLines.shift();
+      var h = $("introHex"); if (h) h.innerHTML = hexLines.map(function (l) { return "<div>" + l + "</div>"; }).join("");
+    }
+    function renderTicks() {
+      var t = $("introTicks"); if (!t) return;
+      var s = ""; for (var i = 0; i < 13; i++) s += '<span class="' + (i < tickCount ? "on" : "") + '"></span>';
+      t.innerHTML = s;
+    }
+
+    function setPhase(p) {
+      statusEl.textContent = STATUS[p] || "";
+      if (p === "gate") {
+        body.innerHTML = '<div class="gate"><div class="i-headline i-glow i-aberrate">AGENT<b>·</b>QA</div>'
+          + '<button class="gate-btn" id="introInit">&#9656; Initialize</button>'
+          + '<div class="gate-sub">schema · fuzz · latency · descriptions</div></div>';
+        $("introInit").addEventListener("click", begin);
+      } else if (p === "power") {
+        body.innerHTML = '<div class="i-headline i-glow i-aberrate i-cursor">AGENT·QA // RELIABILITY BENCH ONLINE</div>';
+      } else if (p === "init") {
+        body.innerHTML = globeSVG()
+          + '<div class="i-sys i-glow">INITIALIZING</div>'
+          + '<div class="i-sys">LOADING PROBE ENGINE <span class="dim">· MCP RUNTIME</span><span class="i-cursor"></span></div>';
+      } else if (p === "probe") {
+        body.innerHTML = '<div class="i-sys i-glow">PROBING ENDPOINT</div>'
+          + '<div class="i-hex" id="introHex"></div>'
+          + '<div class="i-sys dim">SCHEMA · MALFORMED INPUT · LATENCY · DESCRIPTIONS</div>';
+      } else if (p === "verify") {
+        body.innerHTML = '<div class="i-sys i-glow">SCORING RELIABILITY…</div>'
+          + '<div class="i-ticks" id="introTicks"></div>'
+          + '<div class="i-sys dim">COMPUTING CATEGORY GRADES · A TO F</div>';
+        renderTicks();
+      } else if (p === "confirm" || p === "resolve") {
+        body.innerHTML = '<div class="i-confirm">RELIABILITY REPORT READY ✓</div>';
+      }
+      if (p !== "gate") { var i = ORDER.indexOf(p); beep(760 + (i < 0 ? 0 : i) * 70); }
+    }
+
+    // The intro plays sound by default; mute is a pre-arm before Initialize too.
+    var wantSound = true;
+    function syncMute() { muteBtn.textContent = wantSound ? "mute" : "unmute"; }
+    muteBtn.addEventListener("click", function () { wantSound = !wantSound; syncMute(); applyAudio(wantSound); });
+    syncMute();
+
+    function begin() {
+      applyAudio(wantSound);                       // Initialize is the audio-start gesture
+      skipBtn.style.display = "";
+      [["power", 0], ["init", 1800], ["probe", 5000], ["verify", 9000], ["confirm", 13000], ["resolve", 16000]]
+        .forEach(function (s) {
+          timers.push(setTimeout(function () { setPhase(s[0]); if (s[0] === "confirm") confirmTone(); }, s[1]));
+        });
+      timers.push(setTimeout(showLaunch, 17600));
+      var blipI = setInterval(function () { dataBlip(); }, 720);
+      var hexI = setInterval(pushHex, 110);
+      var tickI = setInterval(function () { tickCount = (tickCount + 1) % 14; renderTicks(); }, 280);
+      timers.push(blipI, hexI, tickI);
+      timers.push(setTimeout(function () { clearInterval(blipI); clearInterval(hexI); clearInterval(tickI); }, 13100));
+      setPhase("power");
+    }
+
+    function showLaunch() {
+      skipBtn.style.display = "none";
+      var b = document.createElement("button");
+      b.className = "gate-btn launch-btn"; b.textContent = "Enter bench ▸";
+      b.addEventListener("click", finish);
+      body.appendChild(b);
+    }
+
+    function finish() {
+      clearTimers();
+      try { localStorage.setItem("agentqa_seen_intro", "1"); } catch (e) {}
+      intro.classList.add("is-leaving");
+      setTimeout(function () { intro.remove(); }, 850);
+    }
+
+    skipBtn.addEventListener("click", finish);
+    setPhase("gate");
+  })();
 })();
 </script>
 </body>
