@@ -1,0 +1,49 @@
+# ---- Internal planning & discussion (never commit) ----
+PLAN.md
+Guide.md
+GUIDE.md
+NOTES.md
+notes/
+scratch/
+*.internal.md
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+wheels/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+.python-version
+
+# Test & coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.cache/
+.mypy_cache/
+.ruff_cache/
+
+# ---- Environment & secrets ----
+.env
+.env.*
+*.local
+
+# ---- Editors / OS ----
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db

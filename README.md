@@ -11,10 +11,12 @@ automated version of that work — the reliability layer the agent economy runs 
 
 ## Status
 
-- **Step 1 — core reliability engine: DONE.** Five checks, fully unit-tested
-  (41 tests), verified end-to-end over the real protocol against a live server.
-- Steps 2–6 (FastAPI wrap → FastMCP wrap → deploy → Inspector verify → list on
-  OKX.AI) are next; see `PLAN.md` / `Guide.md`.
+- **Step 1 — core reliability engine: DONE.** Five checks, fully unit-tested,
+  verified end-to-end over the real protocol against a live server.
+- **Step 2 — FastAPI service: DONE.** `POST /evaluate` + `GET /health`, thin
+  wrapper over the engine, verified end-to-end against a live MCP server.
+- Steps 3–6 (FastMCP wrap → deploy → Inspector verify → list on OKX.AI) are next.
+- Full suite: **46 tests passing.**
 
 ## The five checks
 
@@ -51,6 +53,22 @@ python -m core https://your-endpoint.example/mcp
 # Library
 python -c "from core.report import evaluate_sync; print(evaluate_sync(URL).to_text())"
 ```
+
+### HTTP service
+
+```bash
+agent-qa-serve            # or: python -m service   (uvicorn on :8080)
+```
+
+```
+GET  /health   -> {"status": "ok", "service": "agent-qa", "version": "..."}
+POST /evaluate  {"endpoint_url": "https://your-endpoint.example/mcp"}
+               -> full report as JSON (see core.models.Report.to_dict)
+```
+
+An unreachable target returns `200` with `reachable: false` and `grade: "F"` —
+the evaluation succeeded, the target failed. Callers gate on the report body.
+Malformed requests return `422`.
 
 ## Test
 
