@@ -1,0 +1,793 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Agent QA · proof, not trust</title>
+<meta name="description" content="Point it at a public MCP endpoint. It runs a real protocol probe and returns a graded reliability report covering schema, malformed input handling, latency, and description quality." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=Orbitron:wght@400;500;600;700;800&family=Saira:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    /* Mirrored from the reference terminal, recoloured to a grey vibe */
+    --ink: #0a0b0c;
+    --ink-2: #0d0f11;
+    --panel: #101315;
+    --inset: #161a1c;
+    --line: #2f363a;
+    --line-dim: #1c2225;
+    --text: #e9ecee;
+    --dim: #9aa3a8;
+    --faint: #656d72;
+    --accent: #aeb7bd;       /* grey phosphor, replaces the reference green */
+    --accent-dim: #767e84;
+    --glow: rgba(174, 183, 189, 0.55);
+    /* grade bands, kept desaturated to sit inside the grey world */
+    --g-a: #d6dde1;
+    --g-b: #b9c2c7;
+    --g-c: #9aa3a8;
+    --g-d: #7f878c;
+    --g-f: #cf6f6f;          /* only failure gets a colour cue */
+    --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+    --sans: "Saira", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --digital: "Orbitron", var(--mono);
+    --serif: "Fraunces", Georgia, "Times New Roman", serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--ink);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.55;
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+    position: relative;
+    overflow-x: hidden;
+  }
+
+  /* faint engineering grid */
+  body::before {
+    content: ""; position: fixed; inset: 0; z-index: 0; pointer-events: none;
+    background-image:
+      linear-gradient(var(--line-dim) 1px, transparent 1px),
+      linear-gradient(90deg, var(--line-dim) 1px, transparent 1px);
+    background-size: 46px 46px;
+    opacity: 0.5;
+    mask-image: radial-gradient(ellipse 100% 80% at 50% 20%, #000 45%, transparent 100%);
+  }
+  /* scanline shimmer */
+  body::after {
+    content: ""; position: fixed; inset: 0; z-index: 0; pointer-events: none;
+    background: repeating-linear-gradient(0deg, rgba(255,255,255,0.012) 0 1px, transparent 1px 3px);
+  }
+
+  /* giant flanking watermark */
+  .watermark {
+    position: fixed; top: 50%; transform: translateY(-50%);
+    font-family: var(--digital); font-weight: 800;
+    font-size: 42vh; line-height: 0.8; color: #fff;
+    opacity: 0.018; letter-spacing: -0.04em; z-index: 0; pointer-events: none;
+    user-select: none;
+  }
+  .watermark.l { left: -6vw; }
+  .watermark.r { right: -6vw; }
+  @media (max-width: 900px) { .watermark { display: none; } }
+
+  .wrap { position: relative; z-index: 1; max-width: 1000px; margin: 0 auto;
+    padding: clamp(18px, 3vw, 30px) clamp(18px, 4vw, 40px) 60px; }
+
+  /* ------------------------------- Nav ------------------------------- */
+  nav {
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    padding-bottom: 16px; border-bottom: 1px solid var(--line); flex-wrap: wrap;
+  }
+  .brand { display: flex; align-items: center; gap: 13px; }
+  .mark {
+    width: 34px; height: 34px; position: relative; flex: 0 0 auto;
+    border: 1px solid var(--accent-dim);
+    display: grid; place-items: center;
+  }
+  .mark svg { width: 18px; height: 18px; stroke: var(--accent); }
+  .mark::after { content: ""; position: absolute; inset: 3px; border: 1px solid var(--line); }
+  .wordmark { font-family: var(--digital); font-weight: 700; font-size: 20px;
+    letter-spacing: 0.04em; line-height: 1; }
+  .brand .sub { font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.34em;
+    color: var(--faint); text-transform: uppercase; margin-top: 4px; }
+  .nav-right { display: flex; align-items: center; gap: 10px; }
+  .pill {
+    font-family: var(--mono); font-size: 12px; letter-spacing: 0.04em;
+    color: var(--dim); background: var(--inset); border: 1px solid var(--line);
+    padding: 8px 13px; text-decoration: none; display: inline-flex; align-items: center; gap: 8px;
+    transition: color .15s, border-color .15s;
+  }
+  .pill:hover { color: var(--accent); border-color: var(--accent-dim); }
+  .led { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
+  .led.live { background: var(--accent); box-shadow: 0 0 8px var(--glow); animation: pulse 2.4s infinite; }
+  .led.fail { background: var(--g-f); box-shadow: 0 0 8px rgba(207,111,111,.6); }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+  /* ------------------------------ Intro ------------------------------ */
+  .intro { padding: clamp(30px, 6vw, 60px) 0 clamp(20px, 3vw, 34px); max-width: 62ch; }
+  .intro .status-line {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.24em; text-transform: uppercase;
+    color: var(--accent); margin-bottom: 20px; display: flex; align-items: center; gap: 12px;
+  }
+  .intro .status-line::before { content: ""; width: 30px; height: 1px; background: var(--accent-dim); }
+  .intro p { font-size: clamp(19px, 2.6vw, 27px); line-height: 1.35; font-weight: 300;
+    letter-spacing: -0.01em; color: var(--text); }
+  .intro p b { font-weight: 600; color: #fff; }
+  .intro p .mut { color: var(--dim); }
+
+  /* ----------------------------- Section ----------------------------- */
+  .sec-label { font-family: var(--mono); font-size: 12px; letter-spacing: 0.28em;
+    text-transform: uppercase; color: var(--accent); margin: 30px 0 14px; }
+  .sec-desc { color: var(--dim); font-size: 15px; max-width: 64ch; margin-bottom: 22px; }
+
+  /* input + button row */
+  form { display: block; }
+  .field { display: flex; gap: 0; border: 1px solid var(--line); background: var(--ink-2);
+    transition: border-color .2s, box-shadow .2s; }
+  .field:focus-within { border-color: var(--accent-dim); box-shadow: 0 0 0 3px rgba(174,183,189,0.08); }
+  .field .chev { display: grid; place-items: center; padding: 0 4px 0 16px; color: var(--accent);
+    font-family: var(--mono); }
+  input[type="url"] {
+    flex: 1; background: transparent; border: none; outline: none; color: var(--text);
+    font-family: var(--mono); font-size: 14px; padding: 17px 12px; min-width: 0;
+  }
+  input[type="url"]::placeholder { color: var(--faint); }
+  button.run {
+    flex: 0 0 auto; font-family: var(--sans); font-weight: 600; font-size: 12.5px;
+    letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink);
+    background: var(--text); border: none; padding: 0 30px; cursor: pointer;
+    transition: background .18s, transform .1s;
+  }
+  button.run:hover { background: #fff; }
+  button.run:active { transform: translateY(1px); }
+  button.run:disabled { background: var(--dim); cursor: progress; }
+
+  .demo { margin-top: 14px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    font-family: var(--mono); font-size: 12px; }
+  .demo .lbl { color: var(--accent); }
+  .chip { font-family: var(--mono); font-size: 12px; color: var(--dim); background: var(--inset);
+    border: 1px solid var(--line); padding: 6px 11px; cursor: pointer; transition: color .15s, border-color .15s; }
+  .chip:hover { color: var(--accent); border-color: var(--accent-dim); }
+
+  /* corner ticks helper */
+  .ticks { position: relative; }
+  .ticks::before, .ticks::after {
+    content: ""; position: absolute; width: 8px; height: 8px; pointer-events: none;
+    border-color: var(--accent-dim); border-style: solid; opacity: .8;
+  }
+  .ticks::before { top: -1px; left: -1px; border-width: 1px 0 0 1px; }
+  .ticks::after { bottom: -1px; right: -1px; border-width: 0 1px 1px 0; }
+
+  /* --------------------------- Scan / boot --------------------------- */
+  .scan { display: none; margin-top: 24px; border: 1px solid var(--line); background: var(--panel); padding: 18px; }
+  .scan.on { display: block; }
+  .scan .hd { display: flex; justify-content: space-between; font-family: var(--mono);
+    font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--accent); margin-bottom: 12px; }
+  .scan .hd .blink::after { content: "_"; animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  pre.stream { font-family: var(--mono); font-size: 11.5px; line-height: 1.7; color: var(--accent-dim);
+    white-space: pre; overflow: hidden; height: 132px; margin: 0; opacity: .9; }
+  .scan .bar { height: 2px; background: var(--line); margin-top: 12px; position: relative; overflow: hidden; }
+  .scan .bar::after { content: ""; position: absolute; inset: 0; width: 30%;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    animation: sweep 1.05s linear infinite; }
+  @keyframes sweep { from { transform: translateX(-100%);} to { transform: translateX(340%);} }
+
+  /* ----------------------------- Report ------------------------------ */
+  .report { display: none; margin-top: 26px; }
+  .report.on { display: block; }
+  .report-top { display: grid; grid-template-columns: 230px 1fr; gap: 0; border: 1px solid var(--line); }
+  @media (max-width: 720px) { .report-top { grid-template-columns: 1fr; } }
+
+  .seal { padding: 26px 20px; text-align: center; border-right: 1px solid var(--line);
+    background: var(--panel); display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  @media (max-width: 720px) { .seal { border-right: none; border-bottom: 1px solid var(--line); } }
+  .seal .glabel { font-family: var(--mono); font-size: 10px; letter-spacing: 0.3em;
+    text-transform: uppercase; color: var(--faint); margin-bottom: 10px; }
+  .seal .letter { font-family: var(--digital); font-weight: 800; font-size: 84px; line-height: .9; color: currentColor;
+    text-shadow: 0 0 26px var(--glow); animation: stamp .45s cubic-bezier(.2,1.3,.4,1) both; }
+  .seal .num { font-family: var(--digital); font-weight: 600; font-size: 15px; color: var(--text);
+    margin-top: 12px; letter-spacing: 0.06em; }
+  .seal .num .of { color: var(--faint); }
+  .seal .reach { margin-top: 8px; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.16em;
+    text-transform: uppercase; }
+  .reach.ok { color: var(--accent); } .reach.no { color: var(--g-f); }
+  @keyframes stamp { from { transform: scale(1.35); opacity: 0; } to { transform: none; opacity: 1; } }
+
+  .gauges { padding: 22px 22px 12px; background: var(--panel); }
+  .gauges .sec-label { margin: 0 0 16px; }
+  .gauge { margin-bottom: 15px; }
+  .gauge:last-child { margin-bottom: 6px; }
+  .grow { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
+  .grow .gn { font-family: var(--mono); font-size: 12px; color: var(--text); letter-spacing: 0.04em; }
+  .grow .gv { font-family: var(--digital); font-size: 13px; font-weight: 600; color: currentColor; }
+  .track { height: 6px; background: var(--ink); border: 1px solid var(--line); }
+  .fill { height: 100%; width: 0; background: currentColor; box-shadow: 0 0 10px -1px currentColor;
+    transition: width .9s cubic-bezier(.2,.8,.2,1); }
+
+  .grade-a{color:var(--g-a)} .grade-b{color:var(--g-b)} .grade-c{color:var(--g-c)}
+  .grade-d{color:var(--g-d)} .grade-f{color:var(--g-f)}
+
+  .notes { margin-top: 20px; display: grid; gap: 8px; border-left: 2px solid var(--line);
+    padding: 2px 0 2px 16px; }
+  .notes .n { font-family: var(--mono); font-size: 12.5px; color: var(--dim); }
+  .notes .n b { color: var(--accent); font-weight: 500; text-transform: uppercase; font-size: 10px;
+    letter-spacing: 0.16em; margin-right: 10px; }
+
+  /* tools */
+  .tools { margin-top: 28px; }
+  .tool { border: 1px solid var(--line); background: var(--panel); margin-bottom: 8px; }
+  .tool-hd { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 12px 15px; border-bottom: 1px solid var(--line-dim); flex-wrap: wrap; }
+  .tool-nm { font-family: var(--mono); font-weight: 500; font-size: 14px; }
+  .tool-nm::before { content: "> "; color: var(--accent); }
+  .tool-sc { font-family: var(--digital); font-size: 12px; color: var(--dim); }
+  .checks { display: flex; flex-wrap: wrap; gap: 7px; padding: 13px 15px; }
+  .check { display: flex; align-items: center; gap: 9px; border: 1px solid var(--line); background: var(--ink);
+    padding: 8px 11px; font-family: var(--mono); font-size: 12px; color: var(--dim);
+    flex: 1 1 250px; min-width: 0; }
+  .check .mk { flex: 0 0 auto; font-weight: 600; }
+  .check .tag { flex: 0 0 auto; font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--faint); }
+  .check .nt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .check.pass { border-color: #333c3f; } .check.pass .mk { color: var(--accent); }
+  .check.fail { border-color: rgba(207,111,111,.45); background: rgba(207,111,111,.05); } .check.fail .mk { color: var(--g-f); }
+
+  /* defect log */
+  .defects { margin-top: 28px; border: 1px solid var(--line); background: var(--panel); }
+  .defects .sec-label { padding: 15px 16px 0; margin: 0; }
+  .defects ol { list-style: none; padding: 12px 16px 16px; display: grid; gap: 9px; counter-reset: d; }
+  .defects li { counter-increment: d; display: grid; grid-template-columns: auto 1fr; gap: 12px;
+    font-family: var(--mono); font-size: 12.5px; color: var(--text); align-items: start; }
+  .defects li::before { content: "E" counter(d, decimal-leading-zero); font-family: var(--digital);
+    font-size: 10px; color: var(--g-f); border: 1px solid var(--g-f); padding: 2px 6px; line-height: 1.4; }
+  .defects .clean { padding: 15px 16px; font-family: var(--mono); font-size: 12.5px; color: var(--accent); }
+
+  /* error */
+  .error { display: none; margin-top: 22px; border: 1px solid var(--g-f); background: rgba(207,111,111,.06);
+    padding: 16px; font-family: var(--mono); font-size: 12.5px; color: var(--g-f); }
+  .error.on { display: block; }
+  .error b { display: block; letter-spacing: 0.16em; text-transform: uppercase; font-size: 10px; margin-bottom: 6px; }
+
+  /* console strip */
+  .console { margin-top: 40px; border: 1px solid var(--line); background: var(--ink-2); padding: 22px;
+    text-align: center; }
+  .console .prompt { font-family: var(--mono); color: var(--accent); font-size: 13px; }
+  .console .ttl { font-family: var(--digital); font-weight: 600; font-size: 17px; letter-spacing: 0.3em;
+    margin: 8px 0 8px; }
+  .console .ln { font-family: var(--mono); font-size: 12px; color: var(--dim); }
+
+  footer { margin-top: 46px; padding-top: 20px; border-top: 1px solid var(--line); }
+  .foot-top { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; }
+  .foot-top .wordmark { font-size: 30px; }
+  .foot-top .sub { font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.3em; color: var(--faint);
+    text-transform: uppercase; margin-top: 4px; }
+  .foot-links { display: flex; gap: 16px; flex-wrap: wrap; font-family: var(--mono); font-size: 12px; }
+  .foot-links a { color: var(--dim); text-decoration: none; } .foot-links a:hover { color: var(--accent); }
+  .foot-bot { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 22px;
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.14em; color: var(--faint); text-transform: uppercase; }
+
+  .reveal { animation: rise .5s ease both; }
+  .reveal.d2 { animation-delay: .08s; } .reveal.d3 { animation-delay: .16s; } .reveal.d4 { animation-delay: .24s; }
+  @keyframes rise { from { opacity: 0; transform: translateY(12px);} to { opacity: 1; transform: none; } }
+
+  /* ------------------------------ Docs ------------------------------- */
+  .docs-overlay { position: fixed; inset: 0; z-index: 50; display: none;
+    background: rgba(5,6,7,0.72); backdrop-filter: blur(2px); }
+  .docs-overlay.on { display: grid; place-items: center; padding: clamp(10px, 3vw, 40px); }
+  .docs { width: min(1000px, 100%); height: min(86vh, 820px); background: var(--ink);
+    border: 1px solid var(--line); display: grid; grid-template-rows: auto 1fr;
+    box-shadow: 0 40px 120px -40px #000; animation: rise .3s ease both; }
+  .docs-hd { display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 20px; border-bottom: 1px solid var(--line); }
+  .docs-hd .wm { font-family: var(--digital); font-weight: 700; font-size: 16px; letter-spacing: 0.06em; }
+  .docs-hd .wm span { color: var(--accent); }
+  .docs-hd .sub { font-family: var(--mono); font-size: 9px; letter-spacing: 0.3em; color: var(--faint);
+    text-transform: uppercase; margin-top: 3px; }
+  .docs-close { font-family: var(--mono); font-size: 16px; color: var(--dim); background: var(--inset);
+    border: 1px solid var(--line); width: 34px; height: 34px; cursor: pointer; line-height: 1; }
+  .docs-close:hover { color: var(--accent); border-color: var(--accent-dim); }
+  .docs-body { display: grid; grid-template-columns: 200px 1fr; min-height: 0; }
+  @media (max-width: 680px) { .docs-body { grid-template-columns: 1fr; }
+    .docs-nav { display: flex; overflow-x: auto; border-right: none; border-bottom: 1px solid var(--line); }
+    .docs-nav .gh { display: none; } }
+  .docs-nav { border-right: 1px solid var(--line); padding: 14px; display: flex; flex-direction: column; gap: 3px; }
+  .docs-nav button { text-align: left; font-family: var(--mono); font-size: 13px; color: var(--dim);
+    background: none; border: 1px solid transparent; padding: 9px 12px; cursor: pointer; white-space: nowrap;
+    transition: color .15s, background .15s; }
+  .docs-nav button:hover { color: var(--text); }
+  .docs-nav button.active { color: var(--accent); background: var(--inset); border-color: var(--line); }
+  .docs-nav .gh { margin-top: auto; padding: 10px 12px; font-family: var(--mono); font-size: 12px;
+    color: var(--faint); text-decoration: none; }
+  .docs-nav .gh:hover { color: var(--accent); }
+  .docs-content { overflow-y: auto; padding: clamp(22px, 3vw, 40px); }
+  .docs-content section { display: none; max-width: 640px; }
+  .docs-content section.on { display: block; animation: rise .3s ease both; }
+  .docs-content h2 { font-family: var(--serif); font-weight: 600; font-size: clamp(28px, 4vw, 38px);
+    letter-spacing: -0.01em; margin-bottom: 20px; }
+  .docs-content h3 { font-family: var(--serif); font-weight: 600; font-size: 21px; margin: 30px 0 12px; }
+  .docs-content .lead { font-size: 17px; color: var(--text); margin-bottom: 18px; line-height: 1.55; }
+  .docs-content p { color: var(--dim); font-size: 15px; margin-bottom: 15px; line-height: 1.6; }
+  .docs-content p code, .docs-content li code { font-family: var(--mono); font-size: 13px; color: var(--accent);
+    background: var(--inset); border: 1px solid var(--line); padding: 1px 6px; }
+  .docs-content ol, .docs-content ul { color: var(--dim); font-size: 15px; margin: 0 0 15px 2px;
+    padding-left: 20px; line-height: 1.6; }
+  .docs-content ol li, .docs-content ul li { margin-bottom: 9px; }
+  .docs-content b { color: var(--text); font-weight: 600; }
+  .callout { border-left: 2px solid var(--accent-dim); background: var(--panel); padding: 16px 18px;
+    margin: 20px 0; }
+  .callout p { color: var(--text); font-style: italic; margin: 0 0 8px; font-size: 15px; }
+  .callout .cite { font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em; color: var(--accent); font-style: normal; }
+  .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 0; border: 1px solid var(--line); margin: 18px 0; }
+  @media (max-width: 560px) { .cards { grid-template-columns: 1fr; } }
+  .cards .card { padding: 16px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+  .cards .card:nth-child(2n) { border-right: none; }
+  .cards .card .lbl { font-family: var(--mono); font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase;
+    color: var(--accent); margin-bottom: 8px; }
+  .cards .card .ttl { font-family: var(--serif); font-weight: 600; font-size: 16px; margin-bottom: 6px; }
+  .cards .card p { font-size: 13px; margin: 0; }
+  .codeblock { border: 1px solid var(--line); background: var(--ink-2); margin: 14px 0; }
+  .codeblock .cbhd { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px;
+    border-bottom: 1px solid var(--line-dim); font-family: var(--mono); font-size: 11px; color: var(--faint); }
+  .codeblock .copy { font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em; color: var(--dim);
+    background: var(--inset); border: 1px solid var(--line); padding: 4px 9px; cursor: pointer; }
+  .codeblock .copy:hover { color: var(--accent); border-color: var(--accent-dim); }
+  .codeblock pre { margin: 0; padding: 14px 16px; overflow-x: auto; font-family: var(--mono); font-size: 13px;
+    line-height: 1.7; color: var(--text); }
+  .codeblock .cm { color: var(--faint); }   /* comment */
+  .codeblock .fl { color: var(--accent); }   /* flag / keyword */
+  .faq-q { font-family: var(--sans); font-weight: 600; font-size: 16px; color: var(--text); margin: 22px 0 6px; }
+  .faq-q:first-child { margin-top: 0; }
+
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  @media (prefers-reduced-motion: reduce) { *{ animation: none !important; transition: none !important; } .fill{transition:none} }
+</style>
+</head>
+<body>
+  <div class="watermark l" aria-hidden="true">Q</div>
+  <div class="watermark r" aria-hidden="true">A</div>
+
+  <div class="wrap">
+    <nav>
+      <div class="brand">
+        <div class="mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="square"><path d="M4 12.5l5 5L20 6"/></svg>
+        </div>
+        <div>
+          <div class="wordmark">AGENT<span style="color:var(--accent)">·</span>QA</div>
+          <div class="sub">Reliability Bench</div>
+        </div>
+      </div>
+      <div class="nav-right">
+        <button class="pill" id="docsBtn" type="button">DOCS</button>
+        <button class="pill" id="soundToggle" type="button" aria-pressed="false">SOUND OFF</button>
+        <span class="pill" id="statusPill"><span class="led" id="led"></span><span id="statusText">standby</span></span>
+      </div>
+    </nav>
+
+    <main>
+      <section class="intro">
+        <div class="status-line" id="bootLine">System · standby</div>
+        <p>
+          An MCP server asks your agent to <b>trust it</b>. Grade it first.
+          Point Agent QA at any public endpoint and see how it handles bad input,
+          how fast it answers, and whether its tools are described well enough for an AI to use.
+          <span class="mut">You read the proof yourself.</span>
+        </p>
+      </section>
+
+      <section>
+        <div class="sec-label">Evaluate an endpoint</div>
+        <div class="sec-desc">
+          Paste a public MCP endpoint URL. Agent QA opens a real protocol session and runs a
+          read-only probe. It only sends input a correct server rejects, so it never triggers a side effect.
+        </div>
+
+        <form id="form" autocomplete="off">
+          <div class="field ticks">
+            <span class="chev">›</span>
+            <input id="url" name="url" type="url" inputmode="url" required
+              placeholder="https://your-server.example/mcp" aria-label="MCP endpoint URL" />
+            <button class="run" id="run" type="submit">Evaluate</button>
+          </div>
+        </form>
+        <div class="demo">
+          <span class="lbl">or try:</span>
+          <button type="button" class="chip" data-url="http://127.0.0.1:8000/mcp">local test server</button>
+        </div>
+
+        <div class="scan ticks" id="scan" aria-live="polite">
+          <div class="hd"><span id="scanStep" class="blink">running probe</span><span id="scanPct">00%</span></div>
+          <pre class="stream" id="stream"></pre>
+          <div class="bar"></div>
+        </div>
+
+        <div class="error" id="error" role="alert">
+          <b>Probe failed</b><span id="errorMsg"></span>
+        </div>
+
+        <section class="report" id="report" aria-live="polite">
+          <div class="report-top reveal">
+            <div class="seal" id="seal">
+              <div class="glabel">Grade</div>
+              <div class="letter" id="gradeLetter">–</div>
+              <div class="num"><span id="scoreVal">0</span><span class="of"> / 100</span></div>
+              <div class="reach" id="reach"></div>
+            </div>
+            <div class="gauges">
+              <div class="sec-label">Category scores</div>
+              <div id="gaugeList"></div>
+            </div>
+          </div>
+
+          <div class="notes reveal d2" id="notes"></div>
+
+          <div class="tools reveal d3">
+            <div class="sec-label">Per-tool results · <span id="toolCount">0</span> listed</div>
+            <div id="toolList"></div>
+          </div>
+
+          <div class="defects reveal d4">
+            <div class="sec-label">Defect log</div>
+            <ol id="defectList"></ol>
+            <div class="clean" id="noDefects" style="display:none">No issues found · clean bill of health.</div>
+          </div>
+        </section>
+      </section>
+
+      <div class="console ticks">
+        <div class="prompt">&gt;_</div>
+        <div class="ttl">AGENT-QA CONSOLE</div>
+        <div class="ln">read-only MCP probe · schema · fuzz · latency · descriptions</div>
+      </div>
+    </main>
+
+    <footer>
+      <div class="foot-top">
+        <div>
+          <div class="wordmark">AGENT<span style="color:var(--accent)">·</span>QA</div>
+          <div class="sub">Proof, not trust</div>
+        </div>
+        <div class="foot-links">
+          <a href="/docs">API</a>
+          <a href="/health">Health</a>
+          <a href="https://modelcontextprotocol.io" target="_blank" rel="noopener">MCP</a>
+        </div>
+      </div>
+      <div class="foot-bot">
+        <span>MIT · A2MCP ASP</span>
+        <span id="footStamp">OKX.AI · Revenue Rocket</span>
+      </div>
+    </footer>
+  </div>
+
+  <div class="docs-overlay" id="docsOverlay" role="dialog" aria-modal="true" aria-label="Agent QA documentation">
+    <div class="docs">
+      <div class="docs-hd">
+        <div>
+          <div class="wm">AGENT<span>·</span>QA DOCS</div>
+          <div class="sub">Proof, not trust</div>
+        </div>
+        <button class="docs-close" id="docsClose" aria-label="Close documentation">✕</button>
+      </div>
+      <div class="docs-body">
+        <nav class="docs-nav" id="docsNav">
+          <button data-sec="overview" class="active">Overview</button>
+          <button data-sec="bench">Using the bench</button>
+          <button data-sec="cli">Command line</button>
+          <button data-sec="api">HTTP API</button>
+          <button data-sec="faq">FAQ</button>
+          <a class="gh" href="https://modelcontextprotocol.io" target="_blank" rel="noopener">MCP spec ↗</a>
+        </nav>
+        <div class="docs-content" id="docsContent">
+
+          <section data-sec="overview" class="on">
+            <h2>What Agent QA is</h2>
+            <p class="lead">A reliability report for any public MCP server. Give it a URL and get back a graded report on how the server behaves under real conditions.</p>
+            <p>An MCP server asks your agent to trust it. Agent QA checks it instead. It connects the way an agent would, runs five read-only checks, and returns a letter grade with the reasons behind it. Nothing it sends is meant to change state on the server, so it is safe to point at a server you do not own.</p>
+            <div class="callout">
+              <p>"Every listing on OKX.AI has to be tested before it goes live. Agent QA turns that manual step into one call."</p>
+              <span class="cite">A2MCP service · Revenue Rocket lane</span>
+            </div>
+            <h3>The five checks</h3>
+            <p>Each check is scored on its own, then rolled into one grade.</p>
+            <ol>
+              <li><b>Connection and handshake.</b> Can the server open a session and list its tools at all.</li>
+              <li><b>Schema validity.</b> Does every tool declare a valid input schema with its required fields. An agent reads that schema to build its calls.</li>
+              <li><b>Malformed input handling.</b> When the input is bad, does the server reject it cleanly instead of crashing or quietly returning a wrong answer.</li>
+              <li><b>Latency.</b> How fast the server answers over repeated calls, reported as p50 and p95.</li>
+              <li><b>Description quality.</b> Are the tool names and descriptions clear enough for an AI to pick the right tool and fill the right arguments.</li>
+            </ol>
+          </section>
+
+          <section data-sec="bench">
+            <h2>Using the bench</h2>
+            <p>The bench is the box on the home screen. Three steps.</p>
+            <ol>
+              <li>Paste the MCP endpoint URL into the field.</li>
+              <li>Press <b>Evaluate</b> and watch the probe run.</li>
+              <li>Read the report when it lands.</li>
+            </ol>
+            <h3>Reading the report</h3>
+            <div class="cards">
+              <div class="card"><div class="lbl">Grade</div><div class="ttl">The seal</div><p>One letter from A to F, with the overall score out of 100 counting up beside it.</p></div>
+              <div class="card"><div class="lbl">Scores</div><div class="ttl">Category bars</div><p>A bar per check. A red bar is the one place a failure shows in colour.</p></div>
+              <div class="card"><div class="lbl">Tools</div><div class="ttl">Per-tool rows</div><p>Each tool the server lists, with a pass or fail chip for each check.</p></div>
+              <div class="card"><div class="lbl">Issues</div><div class="ttl">Defect log</div><p>The top problems found, worst first, written in plain language.</p></div>
+            </div>
+            <p>An endpoint that cannot be reached comes back as an <code>F</code>, because a server you cannot reach is a server you cannot trust.</p>
+          </section>
+
+          <section data-sec="cli">
+            <h2>Command line</h2>
+            <p>The same engine runs from your terminal with the <code>agent-qa</code> command. Pass it the endpoint URL.</p>
+            <div class="codeblock">
+              <div class="cbhd"><span>evaluate</span><button class="copy" type="button">COPY</button></div>
+              <pre>agent-qa https://your-server.example/mcp</pre>
+            </div>
+            <p>For output a script can parse, add the JSON flag.</p>
+            <div class="codeblock">
+              <div class="cbhd"><span>json output</span><button class="copy" type="button">COPY</button></div>
+              <pre>agent-qa https://your-server.example/mcp <span class="fl">--json</span></pre>
+            </div>
+            <p>The command exits with code <code>1</code> when the endpoint cannot be reached, so it drops straight into a continuous integration check and fails the build on a bad server.</p>
+            <div class="codeblock">
+              <div class="cbhd"><span>ci check</span><button class="copy" type="button">COPY</button></div>
+              <pre><span class="cm"># fails the pipeline if the server is unreachable</span>
+agent-qa https://your-server.example/mcp <span class="fl">--json</span> &gt; report.json</pre>
+            </div>
+          </section>
+
+          <section data-sec="api">
+            <h2>HTTP API</h2>
+            <p>The service is a thin wrapper over the engine. One endpoint does the work.</p>
+            <div class="codeblock">
+              <div class="cbhd"><span>POST /evaluate</span><button class="copy" type="button">COPY</button></div>
+              <pre><span class="cm"># request body</span>
+{ <span class="fl">"endpoint_url"</span>: "https://your-server.example/mcp" }</pre>
+            </div>
+            <p>It returns the full report as JSON: the overall grade and score, a score per category, a per-tool breakdown, and the top issues. A bad request body comes back as <code>422</code>. An unreachable target still returns <code>200</code>, with <code>reachable</code> set to false and the grade set to <code>F</code>, because the evaluation itself succeeded.</p>
+            <h3>Other routes</h3>
+            <ul>
+              <li><code>GET /health</code> returns a liveness check for hosting and monitoring.</li>
+              <li><code>GET /</code> serves this browser interface.</li>
+            </ul>
+          </section>
+
+          <section data-sec="faq">
+            <h2>FAQ</h2>
+            <div class="faq-q">Is it safe to point at a server I do not own?</div>
+            <p>Yes. Every check is read-only. The malformed input probe only sends input that a correct server rejects before it does any work, so it never triggers a real action. Tools that take no arguments are skipped rather than probed, so there is nothing to send.</p>
+            <div class="faq-q">What does an F mean?</div>
+            <p>A score below 60, or an endpoint that could not be reached. Treat it as not ready to depend on yet.</p>
+            <div class="faq-q">Why grade descriptions at all?</div>
+            <p>An AI picks a tool and fills its arguments from the name and description. When those are vague, the agent calls the wrong tool or passes the wrong values, even when the server code is perfectly fine.</p>
+            <div class="faq-q">Which transports does it speak?</div>
+            <p>It tries Streamable HTTP first, then falls back to HTTP with SSE, using the official MCP SDK so it speaks the real protocol.</p>
+          </section>
+
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+(function () {
+  "use strict";
+
+  var CAT_ORDER = ["connection", "schema", "fuzz", "latency", "description"];
+  var CAT_LABELS = {
+    connection: "Connection & handshake", schema: "Schema validity",
+    fuzz: "Malformed-input handling", latency: "Latency", description: "Description quality"
+  };
+  var SCAN_STEPS = ["opening session", "listing tools", "validating schemas",
+                    "fuzzing inputs", "timing latency", "scoring descriptions"];
+  var HEX = "0123456789abcdef";
+  var reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  var $ = function (id) { return document.getElementById(id); };
+  var form = $("form"), urlInput = $("url"), runBtn = $("run");
+  var scan = $("scan"), stream = $("stream"), scanStep = $("scanStep"), scanPct = $("scanPct");
+  var report = $("report"), errorBox = $("error"), errorMsg = $("errorMsg");
+
+  function band(s) { return s >= 90 ? "a" : s >= 80 ? "b" : s >= 70 ? "c" : s >= 60 ? "d" : "f"; }
+  function el(t, c, txt) { var e = document.createElement(t); if (c) e.className = c; if (txt != null) e.textContent = txt; return e; }
+
+  /* ---- optional click/tick audio (mirrors the reference's mute toggle) ---- */
+  var audioOn = false, ac = null;
+  var soundBtn = $("soundToggle");
+  soundBtn.addEventListener("click", function () {
+    audioOn = !audioOn;
+    soundBtn.textContent = audioOn ? "SOUND ON" : "SOUND OFF";
+    soundBtn.setAttribute("aria-pressed", audioOn ? "true" : "false");
+    if (audioOn && !ac) { try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { ac = null; } }
+  });
+  function tick(freq) {
+    if (!audioOn || !ac) return;
+    try {
+      var o = ac.createOscillator(), g = ac.createGain();
+      o.type = "square"; o.frequency.value = freq || 620;
+      g.gain.setValueAtTime(0.03, ac.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + 0.03);
+      o.connect(g); g.connect(ac.destination); o.start(); o.stop(ac.currentTime + 0.035);
+    } catch (e) {}
+  }
+
+  /* ---- digit counter: counts up like a mechanical readout ---- */
+  function countTo(node, target, dur, freq) {
+    target = Math.round(target || 0);
+    if (reduceMotion) { node.textContent = target; return; }
+    var start = performance.now(), from = 0, last = -1;
+    function step(now) {
+      var p = Math.min(1, (now - start) / dur);
+      var e = 1 - Math.pow(1 - p, 3);           // ease-out cubic
+      var v = Math.round(from + (target - from) * e);
+      if (v !== last) { node.textContent = v; if (v !== target) tick(freq); last = v; }
+      if (p < 1) requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
+  }
+
+  /* ---- health LED ---- */
+  fetch("/health").then(function (r) { return r.json(); }).then(function (d) {
+    $("led").classList.add("live");
+    $("statusText").textContent = "live v" + (d.version || "?");
+  }).catch(function () { $("statusText").textContent = "offline"; });
+
+  document.querySelectorAll(".chip").forEach(function (c) {
+    c.addEventListener("click", function () { urlInput.value = c.getAttribute("data-url"); urlInput.focus(); });
+  });
+
+  /* ---- docs modal ---- */
+  var overlay = $("docsOverlay");
+  function openDocs() { overlay.classList.add("on"); document.body.style.overflow = "hidden"; }
+  function closeDocs() { overlay.classList.remove("on"); document.body.style.overflow = ""; }
+  $("docsBtn").addEventListener("click", openDocs);
+  $("docsClose").addEventListener("click", closeDocs);
+  overlay.addEventListener("click", function (e) { if (e.target === overlay) closeDocs(); });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape" && overlay.classList.contains("on")) closeDocs(); });
+  $("docsNav").querySelectorAll("button[data-sec]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var sec = btn.getAttribute("data-sec");
+      $("docsNav").querySelectorAll("button[data-sec]").forEach(function (b) { b.classList.toggle("active", b === btn); });
+      $("docsContent").querySelectorAll("section").forEach(function (s) { s.classList.toggle("on", s.getAttribute("data-sec") === sec); });
+      $("docsContent").scrollTop = 0;
+    });
+  });
+  document.querySelectorAll(".codeblock .copy").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var pre = btn.closest(".codeblock").querySelector("pre");
+      var text = pre.textContent;
+      var done = function () { var old = btn.textContent; btn.textContent = "COPIED"; setTimeout(function () { btn.textContent = old; }, 1200); };
+      if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(text).then(done).catch(done); }
+      else { done(); }
+    });
+  });
+
+  /* ---- scan animation: hex stream + stepping label ---- */
+  var scanTimer = null, hexTimer = null, pct = 0;
+  function randHexLine() {
+    var s = ""; for (var i = 0; i < 58; i++) s += HEX[(Math.random() * 16) | 0];
+    return s.replace(/(.{2})/g, "$1 ").trim();
+  }
+  function startScan() {
+    errorBox.classList.remove("on"); report.classList.remove("on");
+    scan.classList.add("on"); runBtn.disabled = true;
+    setStatus("running", false); pct = 0;
+    var i = 0; scanStep.textContent = SCAN_STEPS[0];
+    scanTimer = setInterval(function () { i = (i + 1) % SCAN_STEPS.length; scanStep.textContent = SCAN_STEPS[i]; }, 620);
+    if (!reduceMotion) {
+      var lines = [];
+      hexTimer = setInterval(function () {
+        lines.push(randHexLine()); if (lines.length > 7) lines.shift();
+        stream.textContent = lines.join("\n");
+        pct = Math.min(97, pct + Math.random() * 9); scanPct.textContent = ("0" + Math.floor(pct)).slice(-2) + "%";
+        tick(340 + Math.random() * 80);
+      }, 90);
+    }
+  }
+  function stopScan() {
+    scan.classList.remove("on"); runBtn.disabled = false;
+    clearInterval(scanTimer); clearInterval(hexTimer); scanTimer = hexTimer = null;
+  }
+  function setStatus(txt, fail) {
+    $("bootLine").textContent = "System · " + txt;
+    var led = $("led");
+    led.classList.remove("fail");
+    if (fail) { led.classList.remove("live"); led.classList.add("fail"); }
+  }
+
+  form.addEventListener("submit", function (e) {
+    e.preventDefault();
+    var url = urlInput.value.trim(); if (!url) return;
+    if (audioOn && ac && ac.state === "suspended") ac.resume();
+    startScan();
+    fetch("/evaluate", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ endpoint_url: url })
+    }).then(function (res) {
+      return res.json().then(function (b) { return { ok: res.ok, body: b }; });
+    }).then(function (r) {
+      stopScan();
+      if (!r.ok) { var d = r.body && r.body.detail;
+        return fail(d ? (typeof d === "string" ? d : JSON.stringify(d)) : "Request rejected."); }
+      render(r.body);
+    }).catch(function (err) { stopScan(); fail("Could not reach the evaluation service. " + err.message); });
+  });
+
+  function fail(msg) {
+    setStatus("fault", true);
+    errorMsg.textContent = " " + msg; errorBox.classList.add("on");
+    errorBox.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+
+  function render(rep) {
+    setStatus(rep.reachable ? "ok · grade " + rep.grade : "unreachable", !rep.reachable);
+    var b = band(rep.overall_score || 0);
+    var seal = $("seal"); seal.className = "seal grade-" + b;
+    var lt = $("gradeLetter"); lt.textContent = rep.grade || "?";
+    lt.style.animation = "none"; void lt.offsetWidth; lt.style.animation = "";
+    countTo($("scoreVal"), rep.overall_score || 0, 900, 720);
+    var reach = $("reach");
+    reach.className = "reach " + (rep.reachable ? "ok" : "no");
+    reach.textContent = rep.reachable ? "● reachable" : "● unreachable";
+
+    var gl = $("gaugeList"); gl.innerHTML = "";
+    CAT_ORDER.forEach(function (cat) {
+      var cs = rep.category_scores || {}; if (!(cat in cs)) return;
+      var score = cs[cat], cb = band(score);
+      var g = el("div", "gauge");
+      var row = el("div", "grow");
+      row.appendChild(el("span", "gn", CAT_LABELS[cat] || cat));
+      var v = el("span", "gv grade-" + cb, "0"); row.appendChild(v);
+      g.appendChild(row);
+      var track = el("div", "track"); var fill = el("div", "fill grade-" + cb); track.appendChild(fill); g.appendChild(track);
+      gl.appendChild(g);
+      countTo(v, score, 850, 520);
+      requestAnimationFrame(function () { requestAnimationFrame(function () { fill.style.width = Math.max(2, score) + "%"; }); });
+    });
+
+    var notes = $("notes"); notes.innerHTML = "";
+    function note(tag, txt) { if (!txt) return; var n = el("div", "n"); n.appendChild(el("b", null, tag)); n.appendChild(document.createTextNode(txt)); notes.appendChild(n); }
+    if (rep.connection) note("conn", rep.connection.note);
+    if (rep.latency) note("lat", rep.latency.note);
+
+    var tools = rep.tools || []; $("toolCount").textContent = tools.length;
+    var tl = $("toolList"); tl.innerHTML = "";
+    if (!tools.length) { var e0 = el("div", "check"); e0.appendChild(el("span", "nt", "No tools listed by this server.")); tl.appendChild(e0); }
+    tools.forEach(function (t) {
+      var card = el("div", "tool");
+      var hd = el("div", "tool-hd");
+      hd.appendChild(el("div", "tool-nm", t.tool_name));
+      hd.appendChild(el("div", "tool-sc", "score " + Math.round(t.score) + "/100"));
+      card.appendChild(hd);
+      var cks = el("div", "checks");
+      (t.checks || []).forEach(function (c) {
+        var chip = el("div", "check " + (c.passed ? "pass" : "fail"));
+        chip.appendChild(el("span", "mk", c.passed ? "✓" : "✕"));
+        chip.appendChild(el("span", "tag", (CAT_LABELS[c.category] || c.category).split(" ")[0]));
+        var nt = el("span", "nt", c.note); nt.title = c.note; chip.appendChild(nt);
+        cks.appendChild(chip);
+      });
+      card.appendChild(cks); tl.appendChild(card);
+    });
+
+    var issues = rep.top_issues || [];
+    var dl = $("defectList"), none = $("noDefects");
+    dl.innerHTML = "";
+    if (!issues.length) { none.style.display = "block"; dl.style.display = "none"; }
+    else { none.style.display = "none"; dl.style.display = "grid"; issues.forEach(function (m) { dl.appendChild(el("li", null, m)); }); }
+
+    report.classList.add("on");
+    report.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+})();
+</script>
+</body>
+</html>
