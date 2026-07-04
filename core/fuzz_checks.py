@@ -8,12 +8,17 @@ without silently running as if the input were valid.
 
 Safety model
 ------------
-This is a probe of *error handling*, never an attack. We only ever send inputs
-that a correct server rejects **before** reaching any business logic, so no
-side-effecting code path is exercised. For a no-argument tool there is no way to
-construct a schema-violating input without inventing data that might be accepted
-and acted upon, so such tools are skipped and reported as "not fuzzable", rather
-than probed unsafely.
+This is a probe of *error handling*, never an attack. Every payload violates the
+schema in a way a correct server rejects **before** reaching any business logic:
+an empty object that omits required fields, and a payload whose every field is a
+wrong type. No payload carries a full set of valid-looking values, so it does not
+look like a real call. Three further safeguards:
+
+* No-argument tools are skipped: there is no schema-violating input to send.
+* Tools the server explicitly annotates ``destructiveHint: true`` are skipped, so
+  a server's own warning is respected.
+* Each call is bounded by a timeout, so a tool that hangs on bad input is graded
+  as a failure rather than stalling the run.
 
 Pure helpers (:func:`generate_malformed_inputs`, :func:`classify_call_outcome`)
 are unit-tested directly; :func:`run_fuzz_check` is the async orchestration.
@@ -21,11 +26,17 @@ are unit-tested directly; :func:`run_fuzz_check` is the async orchestration.
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
+import anyio
 from mcp.shared.exceptions import McpError
 
 from .models import CATEGORY_FUZZ, CheckResult
+
+# Per-call timeout, seconds. A tool that does not answer a malformed call within
+# this window is treated as failing to reject cleanly.
+PER_CALL_TIMEOUT = float(os.environ.get("AGENT_QA_CALL_TIMEOUT", "20"))
 
 # For a declared property type, a value of a deliberately wrong type. Chosen so
 # every value is a plain JSON scalar that only violates the *type* contract.
@@ -84,19 +95,15 @@ def generate_malformed_inputs(schema: Any) -> list[tuple[str, dict[str, Any]]]:
             seen.add(key)
             cases.append((label, args))
 
-    # 1. Omit all required fields (empty object). Violates "required".
+    # 1. Omit all required fields (empty object). Violates "required". This
+    #    already exercises the requiredness check; we deliberately do not send a
+    #    "one field missing, the rest valid" payload, because that would carry
+    #    real, valid-looking values and could be executed by a server that does
+    #    not enforce its own required list.
     if required:
         _add("missing_all_required", {})
 
-    # 2. Omit a single required field while supplying dummy others. Isolates
-    #    the requiredness check from any all-empty short-circuit.
-    if len(required) >= 2:
-        partial: dict[str, Any] = {}
-        for r in required[1:]:
-            partial[r] = _placeholder_for(properties.get(r))
-        _add("missing_one_required", partial)
-
-    # 3. Wrong types: fill every declared property with a wrong-typed value.
+    # 2. Wrong types: fill every declared property with a wrong-typed value.
     wrong_typed: dict[str, Any] = {}
     for prop_name, prop_schema in properties.items():
         declared = _first_declared_type(prop_schema)
@@ -106,20 +113,6 @@ def generate_malformed_inputs(schema: Any) -> list[tuple[str, dict[str, Any]]]:
         _add("wrong_types", wrong_typed)
 
     return cases
-
-
-def _placeholder_for(prop_schema: Any) -> Any:
-    """A schema-*valid* placeholder value, used to fill non-target fields."""
-    declared = _first_declared_type(prop_schema)
-    return {
-        "string": "x",
-        "integer": 1,
-        "number": 1,
-        "boolean": True,
-        "object": {},
-        "array": [],
-        "null": None,
-    }.get(declared, "x")
 
 
 def classify_call_outcome(
@@ -166,6 +159,19 @@ async def run_fuzz_check(session: Any, tool: dict[str, Any]) -> CheckResult:
         A :class:`CheckResult` in the ``fuzz`` category.
     """
     name = tool.get("name", "<unnamed>")
+
+    # Respect a server's own warning: never fuzz a tool it marks destructive.
+    annotations = tool.get("annotations")
+    if isinstance(annotations, dict) and annotations.get("destructiveHint") is True:
+        return CheckResult(
+            category=CATEGORY_FUZZ,
+            name=name,
+            passed=True,
+            score=100.0,
+            note="Tool is annotated destructive; not fuzzed.",
+            details={"skipped": True, "reason": "destructive"},
+        )
+
     cases = generate_malformed_inputs(tool.get("inputSchema"))
 
     if not cases:
@@ -185,11 +191,12 @@ async def run_fuzz_check(session: Any, tool: dict[str, Any]) -> CheckResult:
         raised_mcp = raised_other = False
         is_error_result: bool | None = None
         try:
-            result = await session.call_tool(name, arguments=args)
+            with anyio.fail_after(PER_CALL_TIMEOUT):
+                result = await session.call_tool(name, arguments=args)
             is_error_result = bool(getattr(result, "isError", False))
         except McpError:
             raised_mcp = True
-        except Exception:  # noqa: BLE001 - any non-MCP error counts as a crash
+        except Exception:  # noqa: BLE001 - non-MCP error or timeout counts as a crash
             raised_other = True
 
         outcome, ok = classify_call_outcome(

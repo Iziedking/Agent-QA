@@ -1,5 +1,7 @@
 """Tests for core.fuzz_checks: generation, classification, and the async probe."""
 
+import anyio
+
 from core.fuzz_checks import (
     classify_call_outcome,
     generate_malformed_inputs,
@@ -27,12 +29,23 @@ def test_generate_includes_missing_required_and_wrong_types():
     cases = generate_malformed_inputs(SCHEMA)
     labels = {label for label, _ in cases}
     assert "missing_all_required" in labels
-    assert "missing_one_required" in labels
     assert "wrong_types" in labels
+    # No payload may carry a full set of valid-looking values, so the
+    # "one field missing, the rest valid" case is deliberately not generated.
+    assert "missing_one_required" not in labels
     # wrong_types must actually invert each property's type.
     wrong = dict(cases)["wrong_types"]
     assert isinstance(wrong["symbol"], int)      # string -> int
     assert isinstance(wrong["limit"], str)       # integer -> str
+
+
+def test_generate_never_sends_all_valid_values():
+    # Every generated payload must violate the schema, so none may contain a
+    # valid value for every required field.
+    for _label, args in generate_malformed_inputs(SCHEMA):
+        missing_required = any(r not in args for r in SCHEMA["required"])
+        wrong_typed = "symbol" in args and not isinstance(args["symbol"], str)
+        assert missing_required or wrong_typed
 
 
 def test_generate_no_args_tool_yields_nothing():
@@ -102,3 +115,31 @@ async def test_fuzz_no_arg_tool_skipped_not_penalized():
     assert result.score == 100.0
     assert result.details.get("skipped") is True
     assert session.call_log == []  # confirms nothing was sent
+
+
+async def test_fuzz_skips_destructive_annotated_tool():
+    session = FakeSession(call_behavior=crash)  # would fail if it called
+    tool = {
+        "name": "delete_everything",
+        "inputSchema": SCHEMA,
+        "annotations": {"destructiveHint": True},
+    }
+    result = await run_fuzz_check(session, tool)
+    assert result.passed is True
+    assert result.details.get("skipped") is True
+    assert result.details.get("reason") == "destructive"
+    assert session.call_log == []  # confirms nothing was sent
+
+
+async def test_fuzz_times_out_a_hanging_tool(monkeypatch):
+    import core.fuzz_checks as fz
+
+    monkeypatch.setattr(fz, "PER_CALL_TIMEOUT", 0.05)
+
+    class HangingSession:
+        async def call_tool(self, name, arguments=None):
+            await anyio.sleep(2)  # never returns within the timeout
+
+    result = await run_fuzz_check(HangingSession(), TOOL)
+    assert result.passed is False
+    assert "crash" in result.note.lower()
