@@ -947,10 +947,9 @@ agent-qa https://your-server.example/mcp <span class="fl">--json</span> &gt; rep
     var HEXCH = "0123456789abcdef";
     function randHex(n) { var s = ""; for (var i = 0; i < n; i++) s += HEXCH[(Math.random() * 16) | 0]; return s; }
 
-    // Skip for reduced motion, or on repeat visits unless ?intro is present.
-    var force = new URLSearchParams(location.search).has("intro");
-    var seen = false; try { seen = localStorage.getItem("agentqa_seen_intro") === "1"; } catch (e) {}
-    if (reduceMotion || (seen && !force)) { if (intro) intro.remove(); return; }
+    // The boot gate shows on every load (mirrors avow). Only a reduced-motion
+    // preference skips it, straight to the bench, for accessibility.
+    if (reduceMotion) { if (intro) intro.remove(); return; }
 
     var timers = [];
     function clearTimers() { timers.forEach(function (t) { clearTimeout(t); clearInterval(t); }); timers = []; }
@@ -1040,7 +1039,6 @@ agent-qa https://your-server.example/mcp <span class="fl">--json</span> &gt; rep
 
     function finish() {
       clearTimers();
-      try { localStorage.setItem("agentqa_seen_intro", "1"); } catch (e) {}
       intro.classList.add("is-leaving");
       setTimeout(function () { intro.remove(); }, 850);
     }
