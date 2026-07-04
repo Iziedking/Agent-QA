@@ -1,19 +1,20 @@
 """FastAPI application for Agent QA.
 
-Exposes two endpoints:
+Exposes:
 
-* ``GET  /health``   — liveness probe for hosting platforms and monitoring.
-* ``POST /evaluate`` — accepts a target MCP endpoint URL and returns the full
+* ``GET  /health``   is a liveness probe for hosting platforms and monitoring.
+* ``POST /evaluate`` accepts a target MCP endpoint URL and returns the full
   reliability report produced by :func:`core.report.evaluate`.
+* ``GET  /`` serves the browser UI, and ``/mcp`` is the mounted MCP endpoint.
 
 The layer is deliberately thin: it validates the request shape, calls the core
 engine, and returns the result. All reliability logic lives in ``core`` so it
-stays independently testable and reusable by the MCP wrapper (Step 3).
+stays independently testable and reusable by the MCP server.
 
-A note on status codes: an *unreachable* target is not an API error. The
-evaluation still succeeded — it determined the endpoint is down — so ``/evaluate``
-returns ``200`` with a report whose ``reachable`` is ``false`` and ``grade`` is
-``F``. Callers gate on the report body, not the HTTP status.
+A note on status codes: an unreachable target is not an API error. The
+evaluation still succeeded, it just determined the endpoint is down, so
+``/evaluate`` returns ``200`` with a report whose ``reachable`` is ``false`` and
+``grade`` is ``F``. Callers gate on the report body, not the HTTP status.
 """
 
 from __future__ import annotations
@@ -27,15 +28,23 @@ from pydantic import BaseModel, Field, field_validator
 from core import __version__ as core_version
 from core.report import evaluate
 from core.validation import validate_mcp_url
+from mcp_server.server import mcp as mcp_instance
 
 # The browser-facing demo UI is a single self-contained file served same-origin,
 # so the page can call POST /evaluate without any CORS configuration.
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
+# Build the MCP server as an ASGI app and mount it into this process, so a single
+# container serves the UI, the REST API, and the MCP endpoint under one domain.
+# The MCP app carries its own lifespan (it starts the session manager), which the
+# parent app must run, so we hand that lifespan to FastAPI.
+mcp_app = mcp_instance.http_app(path="/")
+
 app = FastAPI(
     title="Agent QA",
     description="Automated reliability reports for public MCP endpoints.",
     version=core_version,
+    lifespan=mcp_app.lifespan,
 )
 
 
@@ -82,6 +91,11 @@ async def evaluate_endpoint(request: EvaluateRequest) -> dict:
     """
     report = await evaluate(request.endpoint_url)
     return report.to_dict()
+
+
+# Mount the MCP endpoint last, so the explicit routes above take precedence and
+# the MCP protocol is served at /mcp on the same domain.
+app.mount("/mcp", mcp_app)
 
 
 def run() -> None:

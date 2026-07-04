@@ -16,7 +16,9 @@ dependencies = [
 service = [
     "fastapi>=0.111",
     "uvicorn>=0.30",
-    "fastmcp>=2.0",
+    # Pinned below 3 to match the version the code is verified against. FastMCP
+    # itself recommends pinning below the next major in production.
+    "fastmcp>=2.14,<3",
 ]
 dev = [
     "pytest>=8.0",
