@@ -55,6 +55,10 @@ def test_failed_connection_report_is_grade_f():
 
 
 def _patch_session(monkeypatch, session, transport="streamable-http"):
+    # Bypass the SSRF host guard so these tests use example hostnames without
+    # depending on DNS. The guard itself is tested in test_validation.
+    monkeypatch.setenv("AGENT_QA_ALLOW_PRIVATE_HOSTS", "1")
+
     @contextlib.asynccontextmanager
     async def fake_open(url, timeout=15.0):
         yield session, transport
@@ -109,6 +113,8 @@ async def test_evaluate_flags_unreliable_server(monkeypatch):
 
 
 async def test_evaluate_connection_failure_returns_report(monkeypatch):
+    monkeypatch.setenv("AGENT_QA_ALLOW_PRIVATE_HOSTS", "1")
+
     @contextlib.asynccontextmanager
     async def failing_open(url, timeout=15.0):
         raise ConnectionError("no route to host")
@@ -120,3 +126,18 @@ async def test_evaluate_connection_failure_returns_report(monkeypatch):
     assert report.reachable is False
     assert report.grade == "F"
     assert report.error is not None
+
+
+async def test_evaluate_blocks_ssrf_to_private_host(monkeypatch):
+    # No bypass: the SSRF guard must reject a loopback target before connecting.
+    monkeypatch.delenv("AGENT_QA_ALLOW_PRIVATE_HOSTS", raising=False)
+
+    async def fail_if_called(url, timeout=15.0):  # pragma: no cover
+        raise AssertionError("open_mcp_session must not be reached for a blocked host")
+
+    monkeypatch.setattr(report_mod, "open_mcp_session", fail_if_called)
+
+    report = await evaluate("http://127.0.0.1:9/mcp")
+    assert report.reachable is False
+    assert report.grade == "F"
+    assert "public" in (report.error or "").lower()

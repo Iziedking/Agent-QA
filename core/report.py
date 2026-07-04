@@ -9,8 +9,11 @@ and a ranked list of the top issues found. The assembly (:func:`assemble_report`
 
 from __future__ import annotations
 
+import os
 from statistics import mean
 from typing import Any
+
+import anyio
 
 from .connect import (
     connection_failed_result,
@@ -33,6 +36,13 @@ from .models import (
     clamp_score,
 )
 from .schema_checks import check_tool_schema
+from .validation import ensure_public_host
+
+# Resource limits, so a hostile or oversized target cannot pin a worker.
+# A server that lists more tools than this has only its first MAX_TOOLS checked;
+# the report says so. The whole evaluation is bounded by a wall-clock budget.
+MAX_TOOLS = int(os.environ.get("AGENT_QA_MAX_TOOLS", "50"))
+EVAL_BUDGET_SECONDS = float(os.environ.get("AGENT_QA_EVAL_BUDGET", "120"))
 
 # Weight of each category in the overall score. When a category did not run
 # (e.g. no tools, so no schema/fuzz/description data), its weight is dropped and
@@ -152,27 +162,43 @@ async def evaluate(url: str) -> Report:
     than raising, so callers (the API, the MCP tool) always get a report back.
     """
     try:
-        async with open_mcp_session(url) as (session, transport):
-            tools_resp = await session.list_tools()
-            raw_tools = list(getattr(tools_resp, "tools", []) or [])
-            tools = [tool_to_dict(t) for t in raw_tools]
+        # SSRF guard: resolve the host and reject non-public addresses before
+        # dialing. Run in a thread so the DNS lookup never blocks the loop.
+        await anyio.to_thread.run_sync(ensure_public_host, url)
 
-            connection = connection_success_result(transport, len(tools))
-            latency = await run_latency_check(session)
+        with anyio.fail_after(EVAL_BUDGET_SECONDS):
+            async with open_mcp_session(url) as (session, transport):
+                tools_resp = await session.list_tools()
+                raw_tools = list(getattr(tools_resp, "tools", []) or [])
+                total_tools = len(raw_tools)
+                tools = [tool_to_dict(t) for t in raw_tools[:MAX_TOOLS]]
 
-            tool_results: list[ToolResult] = []
-            for tool in tools:
-                checks = [
-                    check_tool_schema(tool),
-                    score_tool_description(tool),
-                    await run_fuzz_check(session, tool),
-                ]
-                tool_results.append(
-                    ToolResult(tool_name=tool.get("name") or "<unnamed>", checks=checks)
+                connection = connection_success_result(
+                    transport, total_tools, evaluated=len(tools)
                 )
+                latency = await run_latency_check(session)
 
-            return assemble_report(url, connection, latency, tool_results)
+                tool_results: list[ToolResult] = []
+                for tool in tools:
+                    checks = [
+                        check_tool_schema(tool),
+                        score_tool_description(tool),
+                        await run_fuzz_check(session, tool),
+                    ]
+                    tool_results.append(
+                        ToolResult(
+                            tool_name=tool.get("name") or "<unnamed>", checks=checks
+                        )
+                    )
 
+                return assemble_report(url, connection, latency, tool_results)
+
+    except TimeoutError:
+        msg = f"Evaluation exceeded its {EVAL_BUDGET_SECONDS:.0f}s time budget"
+        connection = connection_failed_result(msg)
+        report = assemble_report(url, connection, latency=None, tools=[])
+        report.error = msg
+        return report
     except Exception as exc:  # noqa: BLE001 - surface as a failed report
         connection = connection_failed_result(f"{type(exc).__name__}: {exc}")
         report = assemble_report(url, connection, latency=None, tools=[])
@@ -182,6 +208,4 @@ async def evaluate(url: str) -> Report:
 
 def evaluate_sync(url: str) -> Report:
     """Blocking convenience wrapper around :func:`evaluate`."""
-    import anyio
-
     return anyio.run(evaluate, url)
