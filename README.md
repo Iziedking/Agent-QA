@@ -1,85 +1,75 @@
-# Agent QA — automated reliability reports for MCP endpoints
+# Agent QA
 
-Hand it a public MCP endpoint URL; it returns a structured reliability report:
-schema validity, malformed-input handling, latency, description quality, and an
-overall letter grade. Built for the OKX.AI AI Genesis Hackathon as an **A2MCP**
-Agent Service Provider (primary lane: Revenue Rocket).
+Agent QA tells you whether a public MCP server is reliable enough to trust, and gives it a letter grade from A to F.
 
-Every other ASP builder must test their MCP server before listing, and the only
-tool the docs point them to is the manual MCP Inspector. Agent QA sells the
-automated version of that work — the reliability layer the agent economy runs on.
+You hand it the URL of an MCP endpoint. It connects to that server the same way an AI agent would, runs a set of read-only checks, and returns a report you can read in a few seconds.
+
+## Why it exists
+
+Anyone listing an MCP server on OKX.AI has to test it first. The tool the docs point to is the MCP Inspector, which you drive by hand, one call at a time. Agent QA does that testing for you and hands back a single graded report.
+
+If you build MCP servers, this shows you where yours breaks before your users do. If you depend on someone else's server, this tells you how much you can lean on it.
+
+## What it checks
+
+Five things, each scored on its own.
+
+1. Connection and handshake. Can the server open a session and list its tools at all.
+2. Schema validity. Does every tool declare a valid input schema with its required fields. An agent reads that schema to build its calls, so a broken schema breaks the caller.
+3. Malformed input handling. When the server gets bad input, such as a missing field or the wrong type, does it reject it cleanly, or does it crash or quietly return a wrong answer. This probe is read-only. It only sends input that a correct server rejects before it does any real work, so it never triggers a side effect.
+4. Latency. How fast the server answers over repeated calls, reported as p50 and p95.
+5. Description quality. Are the tool names and descriptions clear enough for an AI to pick the right tool and call it correctly. The scoring rubric is written down in the code so every grade is defensible.
+
+The report gives a score for each category, a per-tool breakdown, an overall grade, and a short list of the top issues found.
+
+## How to read the grade
+
+- A, 90 and above. Reliable.
+- B, 80 to 89. Minor issues.
+- C, 70 to 79. Works, with real gaps.
+- D, 60 to 69. Unreliable in places.
+- F, below 60. Do not depend on it yet.
+
+An endpoint that cannot be reached scores F, because a server you cannot reach is a server you cannot trust.
+
+## How to use it
+
+### From the browser
+
+1. Open the Agent QA site.
+2. Paste the MCP endpoint URL into the box.
+3. Press Evaluate.
+4. Read the grade, the category scores, the per-tool results, and the defect log.
+
+### From the command line
+
+Run the `agent-qa` command with the endpoint URL:
+
+```
+agent-qa https://your-server.example/mcp
+```
+
+For machine-readable output, add the JSON flag:
+
+```
+agent-qa https://your-server.example/mcp --json
+```
+
+The command exits with code 1 when the endpoint cannot be reached, so you can drop it into a script or a continuous integration check and let it fail the build on a bad server.
+
+### From the HTTP API
+
+Send a POST request to `/evaluate` with the endpoint URL:
+
+```
+POST /evaluate
+{ "endpoint_url": "https://your-server.example/mcp" }
+```
+
+It returns the full report as JSON. `GET /health` returns a liveness check. `GET /` serves the browser interface.
 
 ## Status
 
-- **Step 1 — core reliability engine: DONE.** Five checks, fully unit-tested,
-  verified end-to-end over the real protocol against a live server.
-- **Step 2 — FastAPI service: DONE.** `POST /evaluate` + `GET /health`, thin
-  wrapper over the engine, verified end-to-end against a live MCP server.
-- Steps 3–6 (FastMCP wrap → deploy → Inspector verify → list on OKX.AI) are next.
-- Full suite: **46 tests passing.**
-
-## The five checks
-
-| # | Check | Module | What it catches |
-|---|-------|--------|-----------------|
-| 1 | Connection & handshake | `core/connect.py` | Endpoint unreachable / not speaking MCP |
-| 2 | Schema validity | `core/schema_checks.py` | Missing/invalid input schema, bad `required` |
-| 3 | Malformed-input handling | `core/fuzz_checks.py` | Crashes or silently accepts invalid input |
-| 4 | Latency (p50/p95) | `core/latency_checks.py` | Slow or unstable response times |
-| 5 | Description quality | `core/description_checks.py` | Tools an AI can't pick/call correctly |
-
-Design: every check is a **pure function on data** plus a **thin async wrapper**,
-so each is unit-tested against known-good/known-bad inputs with no live server.
-`core/report.py` assembles them into one `Report` that renders as JSON (machines)
-or text (humans). The malformed-input probe is **strictly read-only**: it only
-sends inputs that violate a tool's own schema (rejected before any business
-logic runs), and it skips no-argument tools rather than risk a side effect.
-
-## Install
-
-```bash
-pip install -e ".[dev]"        # core engine + test deps
-pip install -e ".[dev,service]" # also FastAPI + FastMCP for Steps 2-3
-```
-
-## Use
-
-```bash
-# CLI
-agent-qa https://your-endpoint.example/mcp
-agent-qa https://your-endpoint.example/mcp --json
-python -m core https://your-endpoint.example/mcp
-
-# Library
-python -c "from core.report import evaluate_sync; print(evaluate_sync(URL).to_text())"
-```
-
-### HTTP service
-
-```bash
-agent-qa-serve            # or: python -m service   (uvicorn on :8080)
-```
-
-```
-GET  /health   -> {"status": "ok", "service": "agent-qa", "version": "..."}
-POST /evaluate  {"endpoint_url": "https://your-endpoint.example/mcp"}
-               -> full report as JSON (see core.models.Report.to_dict)
-```
-
-An unreachable target returns `200` with `reachable: false` and `grade: "F"` —
-the evaluation succeeded, the target failed. Callers gate on the report body.
-Malformed requests return `422`.
-
-## Test
-
-```bash
-python -m pytest -q
-```
-
-## Grading
-
-Overall score is a weighted mean over the categories that ran (weights in
-`core/report.py`), renormalized when a category is absent. Letter grade:
-A ≥ 90, B ≥ 80, C ≥ 70, D ≥ 60, else F. The description rubric is documented in
-full in `core/description_checks.py` so every grade is defensible.
-```
+- Core engine. Done. Five checks, each unit tested against a known-good and a known-bad case, and verified against a live server.
+- HTTP service and browser interface. Done.
+- Next. Package as an MCP tool, deploy behind HTTPS, and list on OKX.AI.
