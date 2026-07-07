@@ -262,6 +262,12 @@
     font-size: 10px; color: var(--g-f); border: 1px solid var(--g-f); padding: 2px 6px; line-height: 1.4; }
   .defects .clean { padding: 15px 16px; font-family: var(--mono); font-size: 12.5px; color: var(--accent); }
 
+  /* reputation memory records: diamond marker, not the red defect counter */
+  .rep-lead { padding: 14px 16px 2px; font-family: var(--mono); font-size: 12px; color: var(--dim); line-height: 1.5; }
+  #repList { padding: 8px 16px 16px; }
+  #repList li::before { content: "\25C6"; border: none; padding: 0; color: var(--accent);
+    font-family: var(--mono); font-size: 10px; line-height: 1.7; }
+
   /* error */
   .error { display: none; margin-top: 22px; border: 1px solid var(--g-f); background: rgba(207,111,111,.06);
     padding: 16px; font-family: var(--mono); font-size: 12.5px; color: var(--g-f); }
@@ -541,6 +547,12 @@
             <div class="sec-label">Defect log</div>
             <ol id="defectList"></ol>
             <div class="clean" id="noDefects" style="display:none">No issues found · clean bill of health.</div>
+          </div>
+
+          <div class="defects reveal d4" id="repBox" style="display:none">
+            <div class="sec-label">Reputation memory · Walrus</div>
+            <div class="rep-lead" id="repLead"></div>
+            <ol id="repList"></ol>
           </div>
         </section>
       </section>
@@ -1027,8 +1039,34 @@ agent-qa https://your-server.example/mcp <span class="fl">--json</span> &gt; rep
     if (!issues.length) { none.style.display = "block"; dl.style.display = "none"; }
     else { none.style.display = "none"; dl.style.display = "grid"; issues.forEach(function (m) { dl.appendChild(el("li", null, m)); }); }
 
+    loadReputation(rep.url);
+
     report.classList.add("on");
     report.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  // Recall this endpoint's remembered track record from Walrus. The panel only
+  // shows when the reputation memory is configured, so it stays quiet otherwise.
+  function loadReputation(url) {
+    var box = $("repBox"), lead = $("repLead"), list = $("repList");
+    if (!box) return;
+    list.innerHTML = ""; box.style.display = "none";
+    if (!url) return;
+    lead.textContent = "Recalling track record from Walrus…";
+    box.style.display = "block";
+    fetch("/reputation?q=" + encodeURIComponent(url + " reliability grade"))
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (!d || !d.memory_enabled) { box.style.display = "none"; return; }
+        var recs = d.records || [];
+        if (!recs.length) {
+          lead.textContent = "First time Agent QA has graded this endpoint. This verdict starts its record on Walrus.";
+          return;
+        }
+        lead.textContent = "Agent QA remembers this endpoint. Any agent can recall this before trusting it:";
+        recs.forEach(function (m) { list.appendChild(el("li", null, m)); });
+      })
+      .catch(function () { box.style.display = "none"; });
   }
 
   /* ---------------------------- Boot intro --------------------------- */
