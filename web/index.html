@@ -1053,20 +1053,24 @@ agent-qa https://your-server.example/mcp <span class="fl">--json</span> &gt; rep
     report.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
-  // Recall this endpoint's remembered track record from Walrus. The panel only
-  // shows when the reputation memory is configured, so it stays quiet otherwise.
+  // Recall this endpoint's remembered track record from Walrus. Query by host
+  // (which recalls reliably), then keep only records that mention this endpoint,
+  // so the panel shows its own history and nothing else. The panel stays hidden
+  // when the reputation memory is not configured.
   function loadReputation(url) {
     var box = $("repBox"), lead = $("repLead"), list = $("repList");
     if (!box) return;
     list.innerHTML = ""; box.style.display = "none";
     if (!url) return;
+    var host = url;
+    try { host = new URL(url).host; } catch (e) {}
     lead.textContent = "Recalling track record from Walrus…";
     box.style.display = "block";
-    fetch("/reputation?q=" + encodeURIComponent(url + " reliability grade"))
+    fetch("/reputation?q=" + encodeURIComponent(host + " reliability grade") + "&limit=12")
       .then(function (r) { return r.json(); })
       .then(function (d) {
         if (!d || !d.memory_enabled) { box.style.display = "none"; return; }
-        var recs = d.records || [];
+        var recs = (d.records || []).filter(function (m) { return host && m.indexOf(host) !== -1; });
         if (!recs.length) {
           lead.textContent = "First time Agent QA has graded this endpoint. This verdict starts its record on Walrus.";
           return;
