@@ -33,10 +33,17 @@ normalized tool dict, so it unit-tests against hand-built inputs.
 
 from __future__ import annotations
 
+import os
 import re
 from typing import Any
 
 from .models import CATEGORY_DESCRIPTION, CheckResult
+
+# Bounds so a hostile server cannot pin a worker with one enormous tool: the
+# description is scanned per property, so cap both the text length scanned and
+# the number of properties considered. Generous, so no real tool is affected.
+MAX_DESCRIPTION_CHARS = int(os.environ.get("AGENT_QA_MAX_DESCRIPTION_CHARS", "20000"))
+MAX_PROPERTIES = int(os.environ.get("AGENT_QA_MAX_PROPERTIES", "200"))
 
 # Names that convey nothing about what a tool does.
 GENERIC_NAMES = {"tool", "run", "do", "call", "exec", "execute", "handler", "fn", "func", "x", "test"}
@@ -85,8 +92,11 @@ def score_tool_description(tool: dict[str, Any]) -> CheckResult:
         )
     breakdown["has_description"] = 40.0
 
+    # Bound the text we scan (it is scanned once per property below).
+    scan_text = description[:MAX_DESCRIPTION_CHARS]
+
     # --- Component 2: description substance ----------------------------------
-    words = _word_count(description)
+    words = _word_count(scan_text)
     if words >= 8:
         breakdown["substance"] = 15.0
     elif words >= 4:
@@ -100,10 +110,11 @@ def score_tool_description(tool: dict[str, Any]) -> CheckResult:
         documented = 0
         total_params = 0
     else:
-        total_params = len(properties)
-        desc_lower = description.lower()
+        prop_items = list(properties.items())[:MAX_PROPERTIES]
+        total_params = len(prop_items)
+        desc_lower = scan_text.lower()
         documented = 0
-        for prop_name, prop_schema in properties.items():
+        for prop_name, prop_schema in prop_items:
             has_own_desc = (
                 isinstance(prop_schema, dict)
                 and bool((prop_schema.get("description") or "").strip())

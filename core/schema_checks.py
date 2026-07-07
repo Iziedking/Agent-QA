@@ -12,9 +12,14 @@ known-good and known-bad inputs, no live server required.
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from .models import CATEGORY_SCHEMA, CheckResult
+
+# Cap on how many properties we validate per tool, so a server that lists an
+# enormous property set cannot pin a worker. Generous, so no real tool is hit.
+MAX_PROPERTIES = int(os.environ.get("AGENT_QA_MAX_PROPERTIES", "200"))
 
 # The set of primitive types JSON Schema permits for the "type" keyword.
 VALID_JSON_SCHEMA_TYPES = {
@@ -92,7 +97,7 @@ def check_tool_schema(tool: dict[str, Any]) -> CheckResult:
         score -= 25
         properties = {}
     else:
-        for prop_name, prop_schema in properties.items():
+        for prop_name, prop_schema in list(properties.items())[:MAX_PROPERTIES]:
             if not isinstance(prop_schema, dict):
                 problems.append(f"property '{prop_name}' is not a schema object")
                 score -= 10
