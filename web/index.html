@@ -17,6 +17,7 @@
     --inset: #161a1c;
     --line: #2f363a;
     --line-dim: #1c2225;
+    --line-bright: #3d464b;   /* a lit line, brighter than the resting border */
     --text: #e9ecee;
     --dim: #9aa3a8;
     --faint: #656d72;
@@ -795,8 +796,19 @@ agent-qa https://your-server.example/mcp <span class="fl">--json</span> &gt; rep
 
   /* ---- docs modal ---- */
   var overlay = $("docsOverlay");
-  function openDocs() { overlay.classList.add("on"); document.body.style.overflow = "hidden"; }
-  function closeDocs() { overlay.classList.remove("on"); document.body.style.overflow = ""; }
+  var benchWrap = document.querySelector(".wrap");
+  // While an overlay is up, make the bench inert so Tab cannot land on the
+  // controls behind it, and move focus into and back out of the dialog.
+  function openDocs() {
+    overlay.classList.add("on"); document.body.style.overflow = "hidden";
+    if (benchWrap) benchWrap.inert = true;
+    $("docsClose").focus();
+  }
+  function closeDocs() {
+    overlay.classList.remove("on"); document.body.style.overflow = "";
+    if (benchWrap) benchWrap.inert = false;
+    $("docsBtn").focus();
+  }
   $("docsBtn").addEventListener("click", openDocs);
   $("docsClose").addEventListener("click", closeDocs);
   overlay.addEventListener("click", function (e) { if (e.target === overlay) closeDocs(); });
@@ -852,22 +864,52 @@ agent-qa https://your-server.example/mcp <span class="fl">--json</span> &gt; rep
     if (fail) { led.classList.remove("live"); led.classList.add("fail"); }
   }
 
+  var inFlight = false;
   form.addEventListener("submit", function (e) {
     e.preventDefault();
+    if (inFlight) return;                 // ignore a second submit while one runs
     var url = urlInput.value.trim(); if (!url) return;
     if (audioOn && ac && ac.state === "suspended") ac.resume();
+    inFlight = true;
     startScan();
+    // An evaluation can run up to the server's budget; cap the wait so a hung
+    // endpoint does not spin the scan forever with no way out.
+    var controller = new AbortController();
+    var deadline = setTimeout(function () { controller.abort(); }, 150000);
     fetch("/evaluate", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ endpoint_url: url })
+      body: JSON.stringify({ endpoint_url: url }),
+      signal: controller.signal
     }).then(function (res) {
-      return res.json().then(function (b) { return { ok: res.ok, body: b }; });
+      // Read as text first: an error from a proxy may be HTML, not JSON, and
+      // res.json() would then throw and be mistaken for a network failure.
+      return res.text().then(function (text) {
+        var body = null;
+        try { body = text ? JSON.parse(text) : null; } catch (_) { body = null; }
+        return { ok: res.ok, status: res.status, body: body };
+      });
     }).then(function (r) {
       stopScan();
-      if (!r.ok) { var d = r.body && r.body.detail;
-        return fail(d ? (typeof d === "string" ? d : JSON.stringify(d)) : "Request rejected."); }
-      render(r.body);
-    }).catch(function (err) { stopScan(); fail("Could not reach the evaluation service. " + err.message); });
+      if (!r.ok) {
+        var d = r.body && r.body.detail;
+        return fail(d ? (typeof d === "string" ? d : JSON.stringify(d))
+                      : ("The service returned an error (HTTP " + r.status + ")."));
+      }
+      if (!r.body || typeof r.body !== "object") {
+        return fail("The service returned an unexpected response.");
+      }
+      try { render(r.body); }
+      catch (err) { fail("Could not display the report. " + err.message); }
+    }).catch(function (err) {
+      stopScan();
+      if (err.name === "AbortError") {
+        fail("Evaluation timed out. The endpoint took too long to respond.");
+      } else {
+        fail("Could not reach the evaluation service. " + err.message);
+      }
+    }).then(function () {
+      clearTimeout(deadline); inFlight = false;
+    });
   });
 
   function fail(msg) {
@@ -916,7 +958,7 @@ agent-qa https://your-server.example/mcp <span class="fl">--json</span> &gt; rep
       var card = el("div", "tool");
       var hd = el("div", "tool-hd");
       hd.appendChild(el("div", "tool-nm", t.tool_name));
-      hd.appendChild(el("div", "tool-sc", "score " + Math.round(t.score) + "/100"));
+      hd.appendChild(el("div", "tool-sc", "score " + Math.round(t.score || 0) + "/100"));
       card.appendChild(hd);
       var cks = el("div", "checks");
       (t.checks || []).forEach(function (c) {
@@ -950,6 +992,10 @@ agent-qa https://your-server.example/mcp <span class="fl">--json</span> &gt; rep
     // The boot gate shows on every load (mirrors avow). Only a reduced-motion
     // preference skips it, straight to the bench, for accessibility.
     if (reduceMotion) { if (intro) intro.remove(); return; }
+
+    // The bench sits behind the boot overlay; make it inert so keyboard focus
+    // stays in the boot sequence until it is dismissed.
+    if (benchWrap) benchWrap.inert = true;
 
     var timers = [];
     function clearTimers() { timers.forEach(function (t) { clearTimeout(t); clearInterval(t); }); timers = []; }
@@ -986,6 +1032,7 @@ agent-qa https://your-server.example/mcp <span class="fl">--json</span> &gt; rep
           + '<button class="gate-btn" id="introInit">&#9656; Initialize</button>'
           + '<div class="gate-sub">schema · fuzz · latency · descriptions</div></div>';
         $("introInit").addEventListener("click", begin);
+        $("introInit").focus();
       } else if (p === "power") {
         body.innerHTML = '<div class="i-headline i-glow i-aberrate i-cursor">AGENT·QA // RELIABILITY BENCH ONLINE</div>';
       } else if (p === "init") {
@@ -1035,10 +1082,13 @@ agent-qa https://your-server.example/mcp <span class="fl">--json</span> &gt; rep
       b.className = "gate-btn launch-btn"; b.textContent = "Enter bench ▸";
       b.addEventListener("click", finish);
       body.appendChild(b);
+      b.focus();
     }
 
     function finish() {
       clearTimers();
+      // Hand the bench back to the keyboard before the overlay leaves.
+      if (benchWrap) benchWrap.inert = false;
       intro.classList.add("is-leaving");
       setTimeout(function () { intro.remove(); }, 850);
     }
