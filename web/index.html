@@ -231,10 +231,14 @@
   .checks { display: flex; flex-wrap: wrap; gap: 7px; padding: 13px 15px; }
   .check { display: flex; align-items: center; gap: 9px; border: 1px solid var(--line); background: var(--ink);
     padding: 8px 11px; font-family: var(--mono); font-size: 12px; color: var(--dim);
-    flex: 1 1 250px; min-width: 0; }
+    flex: 1 1 250px; min-width: 0; cursor: pointer; transition: border-color .15s; }
+  .check:hover, .check:focus-visible { border-color: var(--accent-dim); outline: none; }
   .check .mk { flex: 0 0 auto; font-weight: 600; }
   .check .tag { flex: 0 0 auto; font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--faint); }
   .check .nt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* clicking a chip opens it to the full note: it wraps and takes the whole row */
+  .check.open { flex-basis: 100%; align-items: flex-start; }
+  .check.open .nt { overflow: visible; text-overflow: clip; white-space: normal; word-break: break-word; }
   .check.pass { border-color: #333c3f; } .check.pass .mk { color: var(--accent); }
   .check.fail { border-color: rgba(207,111,111,.45); background: rgba(207,111,111,.05); } .check.fail .mk { color: var(--g-f); }
 
@@ -974,6 +978,18 @@ agent-qa https://your-server.example/mcp <span class="fl">--json</span> &gt; rep
         chip.appendChild(el("span", "mk", c.passed ? "✓" : "✕"));
         chip.appendChild(el("span", "tag", (CAT_LABELS[c.category] || c.category).split(" ")[0]));
         var nt = el("span", "nt", c.note); nt.title = c.note; chip.appendChild(nt);
+        // Click or Enter/Space opens the chip to its full note (they truncate).
+        chip.tabIndex = 0;
+        chip.setAttribute("role", "button");
+        chip.setAttribute("aria-expanded", "false");
+        function toggleChip() {
+          var open = chip.classList.toggle("open");
+          chip.setAttribute("aria-expanded", open ? "true" : "false");
+        }
+        chip.addEventListener("click", toggleChip);
+        chip.addEventListener("keydown", function (e) {
+          if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleChip(); }
+        });
         cks.appendChild(chip);
       });
       card.appendChild(cks);
