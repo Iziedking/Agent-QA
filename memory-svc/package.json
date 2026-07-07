@@ -1,0 +1,14 @@
+{
+  "name": "agent-qa-memory-svc",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Reputation memory sidecar for Agent QA: wraps the Avow SDK so each grade persists as portable, verifiable memory on Walrus, and agents can recall a tool's track record before trusting it.",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "dependencies": {
+    "avow-sdk": "file:vendor/avow-sdk-0.3.1.tgz"
+  }
+}
