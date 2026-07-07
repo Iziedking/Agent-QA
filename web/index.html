@@ -598,6 +598,7 @@
         <nav class="docs-nav" id="docsNav">
           <button data-sec="overview" class="active">Overview</button>
           <button data-sec="bench">Using the bench</button>
+          <button data-sec="analysis">Reading the analysis</button>
           <button data-sec="cli">Command line</button>
           <button data-sec="api">HTTP API</button>
           <button data-sec="faq">FAQ</button>
@@ -642,6 +643,61 @@
               <div class="card"><div class="lbl">Issues</div><div class="ttl">Defect log</div><p>The top problems found, worst first, written in plain language.</p></div>
             </div>
             <p>An endpoint that cannot be reached comes back as an <code>F</code>, because a server you cannot reach is a server you cannot trust.</p>
+          </section>
+
+          <section data-sec="analysis">
+            <h2>Reading the analysis</h2>
+            <p class="lead">Every term the report shows, in plain language, so you can read a grade without guessing.</p>
+
+            <h3>The grade</h3>
+            <p>One letter from A to F, with an overall score out of 100. The score is a weighted average of only the categories that actually ran, so a server with no tools is judged on what could be measured.</p>
+            <ul>
+              <li><b>A</b>, 90 and above. Reliable.</li>
+              <li><b>B</b>, 80 to 89. Minor issues.</li>
+              <li><b>C</b>, 70 to 79. Works, with real gaps.</li>
+              <li><b>D</b>, 60 to 69. Unreliable in places.</li>
+              <li><b>F</b>, below 60, or could not be reached. Do not depend on it yet.</li>
+            </ul>
+
+            <h3>Connection and handshake</h3>
+            <p><b>Reachable</b> means Agent QA opened a real session and the server listed its tools. <b>streamable-http</b> and <b>sse</b> are the two MCP transports; the report says which one connected. If neither connects, the grade is an F.</p>
+
+            <h3>Schema validity</h3>
+            <p>Each tool should declare a valid input schema with its types and required fields. An agent reads that schema to build its call, so a missing or broken schema breaks the caller before it even runs.</p>
+
+            <h3>Malformed input handling</h3>
+            <p>Agent QA sends input that a correct server should reject, then reads how the server responds. Three outcomes:</p>
+            <ul>
+              <li><b>Rejected cleanly.</b> The server returned a proper error. This is what you want.</li>
+              <li><b>Crashed.</b> The server threw an unhandled error or dropped the connection. Unreliable.</li>
+              <li><b>Silently accepted invalid input.</b> The server ran as if the bad input were fine. This is the dangerous one, because the agent gets a confident wrong answer.</li>
+            </ul>
+            <p>So "Rejected all 1 malformed inputs cleanly" means every probe for that tool got a clean rejection.</p>
+
+            <h3>Latency</h3>
+            <p>Agent QA times repeated round-trips to the server, after a couple of untimed warm-up calls so a cold start does not skew the result.</p>
+            <ul>
+              <li><b>p50.</b> The median. Half the calls were faster than this, so it is the typical speed.</li>
+              <li><b>p95.</b> The slow tail. Ninety-five percent of calls were faster, so this captures the worst realistic case, the one that stalls an agent.</li>
+              <li><b>over N calls.</b> How many timed round-trips the numbers are based on.</li>
+              <li><b>The band</b> (measured on p95): excellent up to 300 ms, good up to 800 ms, acceptable up to 2 seconds, slow up to 5 seconds, very slow beyond that.</li>
+              <li><b>High variance (p95 &gt;&gt; p50).</b> The tail is far slower than the median, so responses are unpredictable. Even a fast server loses a few points here, because an agent cannot plan around a server that is usually quick but sometimes very slow.</li>
+            </ul>
+
+            <h3>Description quality</h3>
+            <p>Scores whether an AI could pick this tool and call it correctly from its name and description alone. The number out of 100 comes from four parts: it has a description at all, the description has enough words to be meaningful, its parameters are documented, and its name is descriptive rather than generic.</p>
+            <p><b>0/1 parameters documented</b> means the tool declares one parameter and none of them are explained, neither in the parameter's own description nor named in the tool description. An agent has to guess what to pass.</p>
+
+            <h3>Per-tool rows</h3>
+            <p>Each tool the server lists gets its own row and score, with a chip for schema, description, and malformed input. Click any chip to open it and read the full note. Long tool lists are paged, six at a time.</p>
+
+            <h3>Reputation memory</h3>
+            <p>Below the report sits the endpoint's remembered track record.</p>
+            <ul>
+              <li><b>Remembered.</b> Each verdict is stored on Walrus, sealed so it cannot be quietly changed.</li>
+              <li><b>Shared registry.</b> One memory that every agent reads and writes, so a server graded once carries that record for the next.</li>
+              <li><b>Recall.</b> An agent can ask for a server's history before it trusts it, instead of grading from scratch every time.</li>
+            </ul>
           </section>
 
           <section data-sec="cli">
