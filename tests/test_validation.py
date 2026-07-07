@@ -1,8 +1,16 @@
 """Tests for core.validation: URL shape check and the SSRF guard."""
 
+import httpx
 import pytest
 
-from core.validation import BlockedHostError, ensure_public_host, validate_mcp_url
+from core.validation import (
+    BlockedHostError,
+    _PublicHostTransport,
+    _resolve_and_validate,
+    ensure_public_host,
+    guarded_http_client_factory,
+    validate_mcp_url,
+)
 
 
 def test_accepts_http_and_https():
@@ -54,3 +62,35 @@ def test_ensure_public_host_bypass_flag():
 def test_ensure_public_host_env_bypass(monkeypatch):
     monkeypatch.setenv("AGENT_QA_ALLOW_PRIVATE_HOSTS", "1")
     ensure_public_host("http://127.0.0.1/mcp")
+
+
+# --- resolve-and-pin (DNS-rebinding guard) ---------------------------------
+
+def test_resolve_and_validate_returns_public_literal():
+    assert _resolve_and_validate("8.8.8.8", 443) == "8.8.8.8"
+
+
+def test_resolve_and_validate_blocks_private_literal():
+    with pytest.raises(BlockedHostError):
+        _resolve_and_validate("127.0.0.1", 80)
+
+
+def test_resolve_and_validate_unresolvable_returns_none():
+    assert _resolve_and_validate("nonexistent.invalid.example", 80) is None
+
+
+# --- guarded httpx client factory ------------------------------------------
+
+def test_guarded_factory_routes_through_pinning_transport():
+    client = guarded_http_client_factory()
+    # Redirects are followed (MCP servers often redirect to a trailing slash),
+    # but every hop goes through the pinning transport, so a redirect aimed at an
+    # internal address is refused there rather than by disabling redirects.
+    assert client.follow_redirects is True
+    assert isinstance(client._transport, _PublicHostTransport)
+
+
+def test_guarded_factory_honors_explicit_timeout():
+    timeout = httpx.Timeout(5.0)
+    client = guarded_http_client_factory(timeout=timeout)
+    assert client.timeout == timeout

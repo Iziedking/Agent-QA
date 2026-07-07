@@ -21,6 +21,7 @@ from mcp.client.sse import sse_client
 from mcp.client.streamable_http import streamablehttp_client
 
 from .models import CATEGORY_CONNECTION, CheckResult
+from .validation import guarded_http_client_factory
 
 # Default per-attempt connect timeout, seconds. Kept short so a dead endpoint
 # fails fast instead of hanging the whole report.
@@ -77,10 +78,23 @@ async def open_mcp_session(
     """
     errors: list[str] = []
 
-    # (transport label, factory returning an async ctx mgr of streams)
+    # (transport label, factory returning an async ctx mgr of streams). Both
+    # transports use the guarded httpx client so the SSRF protection (no
+    # redirects, connections pinned to a vetted public IP) covers the actual
+    # connection, not just the pre-flight host check.
     transports = (
-        ("streamable-http", lambda: streamablehttp_client(url, timeout=timeout)),
-        ("sse", lambda: sse_client(url, timeout=timeout)),
+        (
+            "streamable-http",
+            lambda: streamablehttp_client(
+                url, timeout=timeout, httpx_client_factory=guarded_http_client_factory
+            ),
+        ),
+        (
+            "sse",
+            lambda: sse_client(
+                url, timeout=timeout, httpx_client_factory=guarded_http_client_factory
+            ),
+        ),
     )
 
     for label, factory in transports:

@@ -31,7 +31,7 @@ class _FakeSession:
 
 def _ok_streamable():
     @contextlib.asynccontextmanager
-    async def factory(url, timeout=15.0):
+    async def factory(url, timeout=15.0, **kwargs):
         yield (object(), object(), lambda: None)
 
     return factory
@@ -39,7 +39,7 @@ def _ok_streamable():
 
 def _boom_factory(message):
     @contextlib.asynccontextmanager
-    async def factory(url, timeout=15.0):
+    async def factory(url, timeout=15.0, **kwargs):
         raise RuntimeError(message)
         yield  # pragma: no cover
 
@@ -85,7 +85,7 @@ async def test_falls_back_to_sse_when_streamable_fails(monkeypatch):
     monkeypatch.setattr(connect_mod, "streamablehttp_client", _boom_factory("sh down"))
 
     @contextlib.asynccontextmanager
-    async def sse_ok(url, timeout=5.0):
+    async def sse_ok(url, timeout=5.0, **kwargs):
         yield (object(), object())
 
     monkeypatch.setattr(connect_mod, "sse_client", sse_ok)
