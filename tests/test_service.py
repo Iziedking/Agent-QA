@@ -69,3 +69,26 @@ def test_evaluate_rejects_non_http_url():
 def test_evaluate_rejects_missing_url():
     resp = client.post("/evaluate", json={})
     assert resp.status_code == 422
+
+
+def test_evaluate_rejects_overlong_url():
+    resp = client.post(
+        "/evaluate", json={"endpoint_url": "https://example.com/" + "a" * 3000}
+    )
+    assert resp.status_code == 422
+
+
+def test_body_size_middleware_rejects_large_body():
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    tiny = FastAPI()
+    tiny.add_middleware(app_mod.MaxBodySizeMiddleware, max_bytes=100)
+
+    @tiny.post("/echo")
+    async def echo() -> dict:
+        return {"ok": True}
+
+    c = TestClient(tiny)
+    assert c.post("/echo", content=b"x" * 50).status_code == 200
+    assert c.post("/echo", content=b"x" * 500).status_code == 413

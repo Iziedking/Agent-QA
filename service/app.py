@@ -19,10 +19,11 @@ evaluation still succeeded, it just determined the endpoint is down, so
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from fastapi import FastAPI
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field, field_validator
 
 from core import __version__ as core_version
@@ -33,6 +34,80 @@ from mcp_server.server import mcp as mcp_instance
 # The browser-facing demo UI is a single self-contained file served same-origin,
 # so the page can call POST /evaluate without any CORS configuration.
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
+
+# The only request body this service takes is a short URL, so a large body is
+# either a mistake or an attempt to exhaust memory. Cap it well above any real
+# request. This is public and unauthenticated, so the ceiling matters.
+MAX_BODY_BYTES = int(os.environ.get("AGENT_QA_MAX_BODY_BYTES", str(1024 * 1024)))
+
+
+class _BodyTooLarge(Exception):
+    """Raised mid-stream when a request body exceeds :data:`MAX_BODY_BYTES`."""
+
+
+class MaxBodySizeMiddleware:
+    """Reject request bodies larger than a ceiling, before buffering them.
+
+    An oversized declared ``Content-Length`` is refused up front. A body with no
+    declared length is counted as it streams and aborted the moment it crosses
+    the ceiling, so a chunked upload cannot slip past the header check.
+    """
+
+    def __init__(self, app, max_bytes: int) -> None:
+        self.app = app
+        self.max_bytes = max_bytes
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        headers = dict(scope.get("headers") or [])
+        declared = headers.get(b"content-length")
+        if declared is not None:
+            try:
+                if int(declared) > self.max_bytes:
+                    await self._send_413(send)
+                    return
+            except ValueError:
+                pass  # unparseable length; the streaming counter still guards it
+
+        received = 0
+        started = False
+
+        async def counting_receive():
+            nonlocal received
+            message = await receive()
+            if message.get("type") == "http.request":
+                received += len(message.get("body", b""))
+                if received > self.max_bytes:
+                    raise _BodyTooLarge
+            return message
+
+        async def tracking_send(message):
+            nonlocal started
+            if message["type"] == "http.response.start":
+                started = True
+            await send(message)
+
+        try:
+            await self.app(scope, counting_receive, tracking_send)
+        except _BodyTooLarge:
+            if started:
+                raise  # response already began; cannot cleanly replace it
+            await self._send_413(send)
+
+    async def _send_413(self, send) -> None:
+        response = JSONResponse(
+            {"detail": "Request body too large."}, status_code=413
+        )
+        await response(  # a Response is itself an ASGI app
+            {"type": "http"}, self._empty_receive, send
+        )
+
+    @staticmethod
+    async def _empty_receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
 
 # Build the MCP server as an ASGI app and mount it into this process, so a single
 # container serves the UI, the REST API, and the MCP endpoint under one domain.
@@ -47,12 +122,16 @@ app = FastAPI(
     lifespan=mcp_app.lifespan,
 )
 
+# Guard the request body before it is buffered or parsed.
+app.add_middleware(MaxBodySizeMiddleware, max_bytes=MAX_BODY_BYTES)
+
 
 class EvaluateRequest(BaseModel):
     """Request body for ``POST /evaluate``."""
 
     endpoint_url: str = Field(
         ...,
+        max_length=2048,
         description="Public URL of the MCP endpoint to evaluate.",
         examples=["https://example.com/mcp"],
     )
