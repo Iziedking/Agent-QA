@@ -20,13 +20,15 @@ from fastmcp import FastMCP
 from pydantic import Field
 
 from core.report import evaluate
+from core.reputation import recall_reputation, remember_verdict
 from core.validation import validate_mcp_url
 
 mcp = FastMCP(
     name="Agent QA",
     instructions=(
-        "Use this server to test the reliability of a public MCP endpoint. "
-        "Call evaluate_mcp_endpoint with the endpoint URL to get a graded report."
+        "Use this server to check whether a public MCP endpoint is reliable "
+        "before trusting it. Call evaluate_mcp_endpoint to grade an endpoint now, "
+        "or recall_tool_reputation to look up its remembered track record first."
     ),
 )
 
@@ -55,12 +57,52 @@ async def evaluate_mcp_endpoint(
     """
     url = validate_mcp_url(endpoint_url)
     report = await evaluate(url)
+    # Remember this verdict so the endpoint builds a track record agents can
+    # recall later. Runs in the background and never blocks or breaks the report.
+    remember_verdict(report)
     return report.to_dict()
 
 
-# Register the tool while keeping ``evaluate_mcp_endpoint`` a plain callable,
-# so it can be unit tested directly without going through the transport.
+async def recall_tool_reputation(
+    query: Annotated[
+        str,
+        Field(
+            description=(
+                "The MCP endpoint URL or a natural-language question about a tool's "
+                "reliability, for example 'is https://example.com/mcp reliable'."
+            )
+        ),
+    ],
+) -> dict[str, Any]:
+    """Recall Agent QA's remembered track record for an MCP endpoint before trusting it.
+
+    Call this first, before your agent uses an unfamiliar MCP server. It returns
+    the verdicts Agent QA has recorded for that endpoint over time (grade, latency,
+    known issues), pulled from a shared, tamper-evident reputation memory on
+    Walrus. If nothing is remembered yet, the records list is empty and you can
+    call evaluate_mcp_endpoint to grade it now. This is a read of past judgments,
+    not a fresh probe.
+    """
+    recalled = await recall_reputation(query)
+    found = len(recalled["records"])
+    if not recalled["enabled"]:
+        note = "Reputation memory is not configured, so no track record is available."
+    elif found:
+        note = f"Found {found} remembered verdict(s) for this query."
+    else:
+        note = "No verdict remembered yet. Grade it with evaluate_mcp_endpoint to start its record."
+    return {
+        "query": recalled["query"],
+        "records": recalled["records"],
+        "memory_enabled": recalled["enabled"],
+        "note": note,
+    }
+
+
+# Register the tools while keeping the functions plain callables, so they can be
+# unit tested directly without going through the transport.
 mcp.tool(evaluate_mcp_endpoint)
+mcp.tool(recall_tool_reputation)
 
 
 def run() -> None:

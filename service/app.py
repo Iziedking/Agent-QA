@@ -28,6 +28,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from core import __version__ as core_version
 from core.report import evaluate
+from core.reputation import recall_reputation, remember_verdict
 from core.validation import validate_mcp_url
 from mcp_server.server import mcp as mcp_instance
 
@@ -169,7 +170,27 @@ async def evaluate_endpoint(request: EvaluateRequest) -> dict:
     ``422`` from FastAPI's validation before the engine runs.
     """
     report = await evaluate(request.endpoint_url)
+    # Remember the verdict so this endpoint accrues a track record. Fire and
+    # forget: it runs in the background and never blocks or breaks the response.
+    remember_verdict(report)
     return report.to_dict()
+
+
+@app.get("/reputation", tags=["reputation"])
+async def reputation(q: str, limit: int = 6) -> dict:
+    """Recall an MCP endpoint's remembered reliability track record.
+
+    ``q`` is the endpoint URL or a question about it. Returns the verdicts Agent
+    QA has recorded over time, from the shared reputation memory on Walrus. An
+    empty ``records`` list means nothing is remembered yet, or the memory layer
+    is not configured (see ``memory_enabled``).
+    """
+    recalled = await recall_reputation(q, limit=max(1, min(20, limit)))
+    return {
+        "query": recalled["query"],
+        "records": recalled["records"],
+        "memory_enabled": recalled["enabled"],
+    }
 
 
 # Mount the MCP endpoint last, so the explicit routes above take precedence and

@@ -61,6 +61,31 @@ def test_evaluate_unreachable_is_200_with_grade_f(monkeypatch):
     assert body["error"] == "no route"
 
 
+def test_evaluate_remembers_the_verdict(monkeypatch):
+    async def fake_evaluate(url):
+        return _healthy_report(url)
+
+    remembered = {}
+    monkeypatch.setattr(app_mod, "evaluate", fake_evaluate)
+    monkeypatch.setattr(app_mod, "remember_verdict", lambda r: remembered.update(url=r.url))
+
+    resp = client.post("/evaluate", json={"endpoint_url": "https://good.example/mcp"})
+    assert resp.status_code == 200
+    assert remembered.get("url") == "https://good.example/mcp"
+
+
+def test_reputation_endpoint_returns_records(monkeypatch):
+    async def fake_recall(q, limit=6):
+        return {"query": q, "enabled": True, "records": ["svc graded A 92/100"]}
+
+    monkeypatch.setattr(app_mod, "recall_reputation", fake_recall)
+    resp = client.get("/reputation", params={"q": "is svc reliable"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["records"] == ["svc graded A 92/100"]
+    assert body["memory_enabled"] is True
+
+
 def test_evaluate_rejects_non_http_url():
     resp = client.post("/evaluate", json={"endpoint_url": "ftp://nope"})
     assert resp.status_code == 422

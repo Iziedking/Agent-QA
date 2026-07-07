@@ -12,7 +12,7 @@ from core.description_checks import score_tool_description
 from core.models import CheckResult
 from core.report import assemble_report
 from core.schema_checks import check_tool_schema
-from mcp_server.server import evaluate_mcp_endpoint, mcp
+from mcp_server.server import evaluate_mcp_endpoint, mcp, recall_tool_reputation
 
 
 def _report(url):
@@ -39,14 +39,48 @@ async def test_tool_rejects_bad_url():
         await evaluate_mcp_endpoint("ftp://not-allowed")
 
 
+async def test_evaluate_remembers_the_verdict(monkeypatch):
+    async def fake_evaluate(url):
+        return _report(url)
+
+    remembered = {}
+    monkeypatch.setattr(srv, "evaluate", fake_evaluate)
+    monkeypatch.setattr(srv, "remember_verdict", lambda report: remembered.update(url=report.url))
+
+    await evaluate_mcp_endpoint("https://good.example/mcp")
+    assert remembered.get("url") == "https://good.example/mcp"
+
+
+async def test_recall_tool_returns_records(monkeypatch):
+    async def fake_recall(query, limit=6):
+        return {"query": query, "enabled": True, "records": ["svc graded A 92/100"]}
+
+    monkeypatch.setattr(srv, "recall_reputation", fake_recall)
+    out = await recall_tool_reputation("is svc reliable")
+    assert out["records"] == ["svc graded A 92/100"]
+    assert out["memory_enabled"] is True
+    assert "Found" in out["note"]
+
+
+async def test_recall_tool_graceful_when_memory_disabled(monkeypatch):
+    async def fake_recall(query, limit=6):
+        return {"query": query, "enabled": False, "records": []}
+
+    monkeypatch.setattr(srv, "recall_reputation", fake_recall)
+    out = await recall_tool_reputation("anything")
+    assert out["memory_enabled"] is False
+    assert "not configured" in out["note"]
+
+
 async def test_tool_is_registered():
     tools = await mcp.get_tools()
     assert "evaluate_mcp_endpoint" in tools
+    assert "recall_tool_reputation" in tools
 
 
-async def _tool_as_dict():
+async def _tool_as_dict(name="evaluate_mcp_endpoint"):
     tools = await mcp.get_tools()
-    mcp_tool = tools["evaluate_mcp_endpoint"].to_mcp_tool()
+    mcp_tool = tools[name].to_mcp_tool()
     return {
         "name": mcp_tool.name,
         "description": mcp_tool.description,
@@ -54,13 +88,15 @@ async def _tool_as_dict():
     }
 
 
-async def test_own_tool_passes_description_check():
-    tool = await _tool_as_dict()
+@pytest.mark.parametrize("name", ["evaluate_mcp_endpoint", "recall_tool_reputation"])
+async def test_own_tools_pass_description_check(name):
+    tool = await _tool_as_dict(name)
     result = score_tool_description(tool)
-    assert result.passed, f"Agent QA's own tool failed its description check: {result.note}"
+    assert result.passed, f"Agent QA tool {name} failed its own description check: {result.note}"
 
 
-async def test_own_tool_passes_schema_check():
-    tool = await _tool_as_dict()
+@pytest.mark.parametrize("name", ["evaluate_mcp_endpoint", "recall_tool_reputation"])
+async def test_own_tools_pass_schema_check(name):
+    tool = await _tool_as_dict(name)
     result = check_tool_schema(tool)
-    assert result.passed, f"Agent QA's own tool failed its schema check: {result.note}"
+    assert result.passed, f"Agent QA tool {name} failed its own schema check: {result.note}"
