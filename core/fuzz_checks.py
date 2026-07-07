@@ -38,30 +38,64 @@ from .models import CATEGORY_FUZZ, CheckResult
 # this window is treated as failing to reject cleanly.
 PER_CALL_TIMEOUT = float(os.environ.get("AGENT_QA_CALL_TIMEOUT", "20"))
 
-# For a declared property type, a value of a deliberately wrong type. Chosen so
-# every value is a plain JSON scalar that only violates the *type* contract.
-_WRONG_VALUE_FOR_TYPE: dict[str, Any] = {
-    "string": 123456,               # number where string expected
-    "integer": "not_an_integer",    # string where integer expected
-    "number": "not_a_number",       # string where number expected
-    "boolean": "not_a_boolean",     # string where boolean expected
-    "object": "not_an_object",      # string where object expected
-    "array": "not_an_array",        # string where array expected
-    "null": "not_null",             # string where null expected
-}
+# Cap on how many of a tool's properties we build a payload from, so a hostile
+# server that lists a huge property set cannot pin a worker on payload building.
+MAX_PROPERTIES = int(os.environ.get("AGENT_QA_MAX_PROPERTIES", "200"))
+
+# Marker: this property has no value we can send that is guaranteed to violate
+# its declared type, so we must not send one (see ``_wrong_value``).
+_NO_WRONG_VALUE = object()
+
+# Candidate wrong values, each tagged with its JSON Schema type, tried in order.
+# We send a value whose type is excluded by every type the property declares, so
+# the payload is guaranteed type-invalid and a compliant server rejects it before
+# any business logic runs. Structural types (array, object) come first because
+# real tool inputs rarely permit them, which keeps the probe unmistakably wrong.
+_PROBE_BY_TYPE: tuple[tuple[str, Any], ...] = (
+    ("array", ["agent-qa-invalid-probe"]),
+    ("object", {"agent_qa_invalid_probe": True}),
+    ("string", "agent-qa-invalid-probe"),
+    ("boolean", False),
+    ("null", None),
+    ("number", 0.5),
+    ("integer", 987654321),
+)
 
 
-def _first_declared_type(prop_schema: Any) -> str | None:
+def _declared_types(prop_schema: Any) -> set[str] | None:
+    """The set of JSON Schema types a property declares, or None if untyped."""
     if not isinstance(prop_schema, dict):
         return None
     t = prop_schema.get("type")
     if isinstance(t, str):
-        return t
+        return {t}
     if isinstance(t, list):
-        for item in t:
-            if isinstance(item, str) and item != "null":
-                return item
+        names = {item for item in t if isinstance(item, str)}
+        return names or None
     return None
+
+
+def _wrong_value(prop_schema: Any) -> Any:
+    """A value whose JSON type no declared type of the property permits.
+
+    Returns :data:`_NO_WRONG_VALUE` when the property is untyped (any value could
+    be valid) or its declared types cover every JSON type, so no value is
+    guaranteed to be rejected. This is what keeps the probe strictly read-only: a
+    union like ``["string", "integer"]`` must never receive a value that happens
+    to satisfy one of its members, which a lax server could then execute for real.
+    """
+    declared = _declared_types(prop_schema)
+    if declared is None:
+        return _NO_WRONG_VALUE
+    for type_name, value in _PROBE_BY_TYPE:
+        if type_name in declared:
+            continue
+        # An integer literal also satisfies a "number" schema, so only offer the
+        # integer probe when neither integer nor number is permitted.
+        if type_name == "integer" and "number" in declared:
+            continue
+        return value
+    return _NO_WRONG_VALUE
 
 
 def generate_malformed_inputs(schema: Any) -> list[tuple[str, dict[str, Any]]]:
@@ -103,12 +137,15 @@ def generate_malformed_inputs(schema: Any) -> list[tuple[str, dict[str, Any]]]:
     if required:
         _add("missing_all_required", {})
 
-    # 2. Wrong types: fill every declared property with a wrong-typed value.
+    # 2. Wrong types: fill each declared property with a value whose type the
+    #    property forbids. Properties with no safely-violating value (untyped, or
+    #    a union that accepts every type) are skipped, so the payload is always
+    #    guaranteed type-invalid and never a real-looking, executable call.
     wrong_typed: dict[str, Any] = {}
-    for prop_name, prop_schema in properties.items():
-        declared = _first_declared_type(prop_schema)
-        if declared in _WRONG_VALUE_FOR_TYPE:
-            wrong_typed[prop_name] = _WRONG_VALUE_FOR_TYPE[declared]
+    for prop_name, prop_schema in list(properties.items())[:MAX_PROPERTIES]:
+        value = _wrong_value(prop_schema)
+        if value is not _NO_WRONG_VALUE:
+            wrong_typed[prop_name] = value
     if wrong_typed:
         _add("wrong_types", wrong_typed)
 
