@@ -484,10 +484,11 @@
       <section class="intro">
         <div class="status-line" id="bootLine">System · standby</div>
         <p>
-          An MCP server asks your agent to <b>trust it</b>. Grade it first.
-          Point Agent QA at any public endpoint and see how it handles bad input,
-          how fast it answers, and whether its tools are described well enough for an AI to use.
-          <span class="mut">You read the proof yourself.</span>
+          An MCP server asks your agent to <b>trust it</b>. Agent QA checks it instead,
+          and remembers what it found. Grade any public endpoint on how it handles bad input,
+          how fast it answers, and whether its tools are clear enough for an AI to use,
+          then recall that verdict before you trust it.
+          <span class="mut">Proof, not trust.</span>
         </p>
       </section>
 
@@ -495,7 +496,8 @@
         <div class="sec-label">Evaluate an endpoint</div>
         <div class="sec-desc">
           Paste a public MCP endpoint URL. Agent QA opens a real protocol session and runs a
-          read-only probe. It sends only input a correct server rejects before doing any work.
+          read-only probe, then remembers the verdict so any agent can recall it later. It sends
+          only input a correct server rejects before doing any work.
         </div>
 
         <form id="form" autocomplete="off">
@@ -560,7 +562,7 @@
       <div class="console ticks">
         <div class="prompt">&gt;_</div>
         <div class="ttl">AGENT-QA CONSOLE</div>
-        <div class="ln">read-only MCP probe · schema · fuzz · latency · descriptions</div>
+        <div class="ln">read-only MCP probe · verdicts remembered on Walrus · recall before you trust</div>
       </div>
     </main>
 
@@ -605,8 +607,8 @@
 
           <section data-sec="overview" class="on">
             <h2>What Agent QA is</h2>
-            <p class="lead">A reliability report for any public MCP server. Give it a URL and get back a graded report on how the server behaves under real conditions.</p>
-            <p>An MCP server asks your agent to trust it. Agent QA checks it instead. It connects the way an agent would, runs five read-only checks, and returns a letter grade with the reasons behind it. Nothing it sends is meant to change state on the server, so it is safe to point at a server you do not own.</p>
+            <p class="lead">A reputation layer for MCP tools. Give it a URL, get a graded report on how the server behaves, and a remembered track record any agent can recall before trusting it.</p>
+            <p>An MCP server asks your agent to trust it. Agent QA checks it instead, and remembers what it found. It connects the way an agent would, runs five read-only checks, and returns a letter grade with the reasons behind it. Nothing it sends is meant to change state on the server, so it is safe to point at a server you do not own.</p>
             <div class="callout">
               <p>"Every listing on OKX.AI has to be tested before it goes live. Agent QA turns that manual step into one call."</p>
               <span class="cite">Built for the OKX.AI marketplace</span>
@@ -620,6 +622,8 @@
               <li><b>Latency.</b> How fast the server answers over repeated calls, reported as p50 and p95.</li>
               <li><b>Description quality.</b> Are the tool names and descriptions clear enough for an AI to pick the right tool and fill the right arguments.</li>
             </ol>
+            <h3>Reputation memory</h3>
+            <p>Every grade is remembered as a compact, tamper-evident fact on Walrus, in one shared registry. Before an agent uses an unfamiliar server, it can recall what Agent QA found last time and trust the tool with proof instead of a shrug. A tool graded once is vetted for everyone who asks after. The memory is optional: with no account configured, grading still works and the panel reports that memory is off.</p>
           </section>
 
           <section data-sec="bench">
@@ -671,9 +675,11 @@ agent-qa https://your-server.example/mcp <span class="fl">--json</span> &gt; rep
             <p>It returns the full report as JSON: the overall grade and score, a score per category, a per-tool breakdown, and the top issues. A bad request body comes back as <code>422</code>. An unreachable target still returns <code>200</code>, with <code>reachable</code> set to false and the grade set to <code>F</code>, because the evaluation itself succeeded.</p>
             <h3>Other routes</h3>
             <ul>
+              <li><code>GET /reputation?q=...</code> returns a server's remembered track record, without grading it again. The query is the endpoint URL or a question about it.</li>
               <li><code>GET /health</code> returns a liveness check for hosting and monitoring.</li>
               <li><code>GET /</code> serves this browser interface.</li>
             </ul>
+            <p>As an MCP server it exposes two tools: <code>evaluate_mcp_endpoint</code> grades a server now, and <code>recall_tool_reputation</code> returns what Agent QA remembers about it, so an agent can check a tool before it trusts it.</p>
           </section>
 
           <section data-sec="faq">
@@ -682,6 +688,8 @@ agent-qa https://your-server.example/mcp <span class="fl">--json</span> &gt; rep
             <p>It is built to be. Every check is read-only. The malformed input probe sends only input that a correct server rejects before it does any work, and no payload carries a full set of valid-looking values. Tools that take no arguments, and tools the server marks destructive, are skipped rather than probed.</p>
             <div class="faq-q">What does an F mean?</div>
             <p>A score below 60, or an endpoint that could not be reached. Treat it as not ready to depend on yet.</p>
+            <div class="faq-q">Where is the reputation kept, and can it be edited?</div>
+            <p>Each verdict is stored on Walrus through MemWal and sealed, so it is portable across machines and cannot be quietly rewritten. It lives in one shared registry, so a server graded once carries that record for the next agent. The memory is optional: with no account set, Agent QA still grades every endpoint and simply reports that memory is off.</p>
             <div class="faq-q">Why grade descriptions at all?</div>
             <p>An AI picks a tool and fills its arguments from the name and description. When those are vague, the agent calls the wrong tool or passes the wrong values, even when the server code is perfectly fine.</p>
             <div class="faq-q">Which transports does it speak?</div>
