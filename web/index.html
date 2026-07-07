@@ -50,20 +50,18 @@
     overflow-x: hidden;
   }
 
-  /* faint engineering grid */
+  /* soft phosphor depth: a faint glow lifted from the top, grounded at the base.
+     No grid, so the surface reads as a clean panel rather than graph paper. */
   body::before {
     content: ""; position: fixed; inset: 0; z-index: 0; pointer-events: none;
-    background-image:
-      linear-gradient(var(--line-dim) 1px, transparent 1px),
-      linear-gradient(90deg, var(--line-dim) 1px, transparent 1px);
-    background-size: 46px 46px;
-    opacity: 0.5;
-    mask-image: radial-gradient(ellipse 100% 80% at 50% 20%, #000 45%, transparent 100%);
+    background:
+      radial-gradient(135% 85% at 50% -20%, rgba(174, 183, 189, 0.05), transparent 55%),
+      radial-gradient(120% 100% at 50% 120%, rgba(0, 0, 0, 0.55), transparent 62%);
   }
-  /* scanline shimmer */
+  /* the faintest scanline texture, kept well below the threshold of a pattern */
   body::after {
     content: ""; position: fixed; inset: 0; z-index: 0; pointer-events: none;
-    background: repeating-linear-gradient(0deg, rgba(255,255,255,0.012) 0 1px, transparent 1px 3px);
+    background: repeating-linear-gradient(0deg, rgba(255,255,255,0.008) 0 1px, transparent 1px 4px);
   }
 
   /* giant flanking watermark */
@@ -239,6 +237,15 @@
   .check .nt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .check.pass { border-color: #333c3f; } .check.pass .mk { color: var(--accent); }
   .check.fail { border-color: rgba(207,111,111,.45); background: rgba(207,111,111,.05); } .check.fail .mk { color: var(--g-f); }
+
+  /* per-tool pager, shown only when a server lists more tools than one page */
+  .pager { display: flex; align-items: center; justify-content: center; gap: 16px; margin-top: 14px; }
+  .pg-btn { font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--dim); background: var(--ink); border: 1px solid var(--line); padding: 6px 13px; cursor: pointer;
+    transition: color .15s, border-color .15s; }
+  .pg-btn:hover:not(:disabled) { color: var(--accent); border-color: var(--accent-dim); }
+  .pg-btn:disabled { opacity: 0.3; cursor: default; }
+  .pg-info { font-family: var(--mono); font-size: 11px; color: var(--faint); letter-spacing: 0.04em; }
 
   /* defect log */
   .defects { margin-top: 28px; border: 1px solid var(--line); background: var(--panel); }
@@ -522,6 +529,7 @@
           <div class="tools reveal d3">
             <div class="sec-label">Per-tool results · <span id="toolCount">0</span> listed</div>
             <div id="toolList"></div>
+            <div id="toolPager" class="pager"></div>
           </div>
 
           <div class="defects reveal d4">
@@ -952,9 +960,9 @@ agent-qa https://your-server.example/mcp <span class="fl">--json</span> &gt; rep
     if (rep.latency) note("lat", rep.latency.note);
 
     var tools = rep.tools || []; $("toolCount").textContent = tools.length;
-    var tl = $("toolList"); tl.innerHTML = "";
-    if (!tools.length) { var e0 = el("div", "check"); e0.appendChild(el("span", "nt", "No tools listed by this server.")); tl.appendChild(e0); }
-    tools.forEach(function (t) {
+    var tl = $("toolList"), pager = $("toolPager");
+    var TOOLS_PER_PAGE = 6;
+    function toolCard(t) {
       var card = el("div", "tool");
       var hd = el("div", "tool-hd");
       hd.appendChild(el("div", "tool-nm", t.tool_name));
@@ -968,8 +976,33 @@ agent-qa https://your-server.example/mcp <span class="fl">--json</span> &gt; rep
         var nt = el("span", "nt", c.note); nt.title = c.note; chip.appendChild(nt);
         cks.appendChild(chip);
       });
-      card.appendChild(cks); tl.appendChild(card);
-    });
+      card.appendChild(cks);
+      return card;
+    }
+    tl.innerHTML = ""; pager.innerHTML = "";
+    if (!tools.length) {
+      var e0 = el("div", "check"); e0.appendChild(el("span", "nt", "No tools listed by this server.")); tl.appendChild(e0);
+    } else if (tools.length <= TOOLS_PER_PAGE) {
+      tools.forEach(function (t) { tl.appendChild(toolCard(t)); });
+    } else {
+      // Page long tool lists (Nansen lists 37) so the report does not scroll on.
+      var pages = Math.ceil(tools.length / TOOLS_PER_PAGE), page = 0;
+      function showPage(scroll) {
+        var start = page * TOOLS_PER_PAGE, stop = Math.min(start + TOOLS_PER_PAGE, tools.length);
+        tl.innerHTML = "";
+        tools.slice(start, stop).forEach(function (t) { tl.appendChild(toolCard(t)); });
+        pager.innerHTML = "";
+        var prev = el("button", "pg-btn", "‹ prev"); prev.type = "button"; prev.disabled = page === 0;
+        prev.addEventListener("click", function () { if (page > 0) { page--; showPage(true); } });
+        var info = el("span", "pg-info",
+          "page " + (page + 1) + " / " + pages + " · " + (start + 1) + "–" + stop + " of " + tools.length);
+        var next = el("button", "pg-btn", "next ›"); next.type = "button"; next.disabled = page >= pages - 1;
+        next.addEventListener("click", function () { if (page < pages - 1) { page++; showPage(true); } });
+        pager.appendChild(prev); pager.appendChild(info); pager.appendChild(next);
+        if (scroll) tl.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+      showPage(false);
+    }
 
     var issues = rep.top_issues || [];
     var dl = $("defectList"), none = $("noDefects");
