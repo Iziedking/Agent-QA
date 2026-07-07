@@ -1085,9 +1085,17 @@ agent-qa https://your-server.example/mcp <span class="fl">--json</span> &gt; rep
     var HEXCH = "0123456789abcdef";
     function randHex(n) { var s = ""; for (var i = 0; i < n; i++) s += HEXCH[(Math.random() * 16) | 0]; return s; }
 
-    // The boot gate shows on every load (mirrors avow). Only a reduced-motion
-    // preference skips it, straight to the bench, for accessibility.
-    if (reduceMotion) { if (intro) intro.remove(); return; }
+    // The boot gate plays once per browser session, not on every load, so a
+    // refresh keeps you on the bench instead of replaying the whole sequence.
+    // Reduced motion always skips it; "?intro" forces it for a demo.
+    var forceIntro = /[?&]intro\b/.test(location.search);
+    var seenIntro = false;
+    try { seenIntro = sessionStorage.getItem("aqa_intro_seen") === "1"; } catch (e) {}
+    if (reduceMotion || (seenIntro && !forceIntro)) {
+      if (intro) intro.remove();
+      return;
+    }
+    try { sessionStorage.setItem("aqa_intro_seen", "1"); } catch (e) {}
 
     // The bench sits behind the boot overlay; make it inert so keyboard focus
     // stays in the boot sequence until it is dismissed.
