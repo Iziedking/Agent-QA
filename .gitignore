@@ -14,6 +14,11 @@ deploy.md
 caddy_data/
 caddy_config/
 
+# ---- Node (memory sidecar) ----
+# node_modules are rebuilt from the vendored Avow SDK tarball, which IS tracked.
+node_modules/
+npm-debug.log*
+
 # ---- Python ----
 __pycache__/
 *.py[cod]

@@ -1,7 +1,8 @@
-# Two services on one host: the app container and Caddy in front of it.
-# Caddy is the only service exposed to the internet. It terminates HTTPS and
-# forwards to the app over the internal network, so the app never speaks TLS
-# and never publishes a port to the host.
+# Three services on one host: the app, the reputation memory sidecar, and Caddy
+# in front. Caddy is the only service exposed to the internet. It terminates
+# HTTPS and forwards to the app over the internal network, so the app never
+# speaks TLS and never publishes a port to the host. The memory sidecar is
+# internal only; the app reaches it at memory:4000.
 
 services:
   app:
@@ -15,7 +16,28 @@ services:
     # unauthenticated endpoint cannot exhaust the host and take Caddy down with it.
     mem_limit: 512m
     cpus: 1.0
+    environment:
+      # Where the reputation memory lives. The app degrades gracefully if it is
+      # unreachable, so this is a soft dependency.
+      - AGENT_QA_MEMORY_URL=http://memory:4000
+    depends_on:
+      - memory
     # The image defines the HEALTHCHECK; Caddy waits for it before starting.
+
+  memory:
+    build: ./memory-svc
+    restart: unless-stopped
+    expose:
+      - "4000"
+    # MemWal credentials come from the environment or a gitignored .env file next
+    # to this compose file. Without them the sidecar runs but stores nothing, and
+    # the app still grades as usual.
+    environment:
+      - MEMWAL_PRIVATE_KEY=${MEMWAL_PRIVATE_KEY:-}
+      - MEMWAL_ACCOUNT_ID=${MEMWAL_ACCOUNT_ID:-}
+      - MEMWAL_SERVER_URL=${MEMWAL_SERVER_URL:-https://relayer.memwal.ai}
+    mem_limit: 384m
+    cpus: 0.5
 
   caddy:
     image: caddy:2-alpine
