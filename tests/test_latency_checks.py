@@ -59,10 +59,24 @@ def test_grade_latency_variance_penalty():
 
 async def test_run_latency_check_times_calls():
     session = FakeSession(tools=[])
-    result = await run_latency_check(session, rounds=5)
-    assert session.list_tools_calls == 5
+    result = await run_latency_check(session, rounds=5, warmup=2)
+    # Warm-up calls are made but not counted toward the graded sample.
+    assert session.list_tools_calls == 7
+    assert result.details["rounds"] == 5
     assert result.category == "latency"
-    assert "rounds" in result.details
+
+
+async def test_run_latency_check_discards_warmup():
+    session = FakeSession(tools=[])
+    result = await run_latency_check(session, rounds=4, warmup=3)
+    assert session.list_tools_calls == 7  # 3 warm-up + 4 timed
+    assert result.details["rounds"] == 4
+
+
+async def test_run_latency_check_no_warmup_when_zero():
+    session = FakeSession(tools=[])
+    await run_latency_check(session, rounds=3, warmup=0)
+    assert session.list_tools_calls == 3
 
 
 async def test_run_latency_check_handles_probe_failure():

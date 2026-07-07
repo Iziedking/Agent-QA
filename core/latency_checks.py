@@ -9,6 +9,11 @@ effects) the probe times ``list_tools()`` round-trips. That still exercises the
 full request and response path (transport, framing, serialization, the server's
 request handler) without invoking any listed tool.
 
+The first round-trips after a handshake carry one-off warm-up cost (TLS session
+setup, cold caches, JIT paths), which would otherwise dominate the tail and make
+the score swing between runs. So a couple of untimed warm-up calls are discarded
+before sampling, and steady-state latency is what gets graded.
+
 The math (:func:`compute_percentiles`) and the grading (:func:`grade_latency`)
 are pure and unit-tested. :func:`run_latency_check` is the thin async wrapper
 that gathers the samples from a live session.
@@ -120,33 +125,49 @@ def grade_latency(p50_ms: float, p95_ms: float, rounds: int) -> CheckResult:
     )
 
 
-async def run_latency_check(session: Any, rounds: int = 6) -> CheckResult:
+async def run_latency_check(
+    session: Any, rounds: int = 8, warmup: int = 2
+) -> CheckResult:
     """Measure round-trip latency by timing repeated ``list_tools`` calls.
 
     Args:
         session: An initialized MCP ``ClientSession`` (or a compatible stub
             exposing an async ``list_tools()``).
-        rounds: Number of round-trips to time.
+        rounds: Number of round-trips to time (after warm-up).
+        warmup: Number of untimed round-trips run first and discarded, so
+            one-off connection warm-up does not skew the sampled latency.
 
     Returns:
-        A graded latency :class:`CheckResult`. If a round-trip raises, the
+        A graded latency :class:`CheckResult`. If any round-trip raises, the
         check fails with a note (an endpoint that cannot answer a basic
         request repeatedly is unreliable by definition).
     """
+
+    def _failed(phase: str, exc: Exception, timed: int) -> CheckResult:
+        return CheckResult(
+            category=CATEGORY_LATENCY,
+            name="round-trip",
+            passed=False,
+            score=0.0,
+            note=f"Round-trip failed during latency {phase}: {exc}",
+            details={"rounds_attempted": timed + 1},
+        )
+
+    # Warm-up: exercise the path a few times without timing, so cold-start cost
+    # (TLS, first-request caches) does not land in the sampled percentiles.
+    for _ in range(max(0, warmup)):
+        try:
+            await session.list_tools()
+        except Exception as exc:  # noqa: BLE001 - report, don't crash the run
+            return _failed("warm-up", exc, timed=0)
+
     samples_ms: list[float] = []
     for _ in range(max(1, rounds)):
         start = time.perf_counter()
         try:
             await session.list_tools()
         except Exception as exc:  # noqa: BLE001 - report, don't crash the run
-            return CheckResult(
-                category=CATEGORY_LATENCY,
-                name="round-trip",
-                passed=False,
-                score=0.0,
-                note=f"Round-trip failed during latency probe: {exc}",
-                details={"rounds_attempted": len(samples_ms) + 1},
-            )
+            return _failed("probe", exc, timed=len(samples_ms))
         samples_ms.append((time.perf_counter() - start) * 1000.0)
 
     stats = compute_percentiles(samples_ms)
