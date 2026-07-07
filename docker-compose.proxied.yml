@@ -1,0 +1,53 @@
+# Deploy Agent QA BEHIND an existing ingress Caddy.
+#
+# Use this instead of docker-compose.yml when the VPS already has a Caddy that
+# owns ports 80 and 443. This file ships no Caddy and publishes no host ports.
+# The app and memory containers run on your ingress Caddy's Docker network, and
+# your Caddy reverse-proxies agentsqa.xyz to agentqa-app:9090 by name.
+#
+# Before bringing it up:
+#   1. Set `name:` under networks.edge to your ingress Caddy's network. Find it
+#      with `docker network ls` (it is the network your Caddy container is on).
+#   2. Put MEMWAL_PRIVATE_KEY and MEMWAL_ACCOUNT_ID in a gitignored .env here.
+#   3. Add the agentsqa.xyz site block to your ingress Caddyfile (see deploy.md).
+#
+# Bring up:  docker compose -f docker-compose.proxied.yml up -d --build
+
+services:
+  app:
+    build: .
+    container_name: agentqa-app
+    restart: unless-stopped
+    # No published ports. The ingress Caddy reaches this at agentqa-app:9090 on
+    # the shared edge network; the app talks to memory on the internal network.
+    environment:
+      - AGENT_QA_MEMORY_URL=http://agentqa-memory:4000
+    depends_on:
+      - memory
+    mem_limit: 512m
+    cpus: 1.0
+    networks:
+      - edge
+      - internal
+
+  memory:
+    build: ./memory-svc
+    container_name: agentqa-memory
+    restart: unless-stopped
+    # Internal only. Reachable by the app, never by the ingress or the internet.
+    environment:
+      - MEMWAL_PRIVATE_KEY=${MEMWAL_PRIVATE_KEY:-}
+      - MEMWAL_ACCOUNT_ID=${MEMWAL_ACCOUNT_ID:-}
+      - MEMWAL_SERVER_URL=${MEMWAL_SERVER_URL:-https://relayer.memwal.ai}
+    mem_limit: 384m
+    cpus: 0.5
+    networks:
+      - internal
+
+networks:
+  # The existing ingress Caddy's network (arcrun-caddy is attached to this).
+  edge:
+    external: true
+    name: deploy_default
+  internal:
+    driver: bridge
