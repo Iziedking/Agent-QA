@@ -6,16 +6,20 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "Agent QA" }]
+# Upper bounds cap the next major, so a fresh image build cannot silently pull a
+# breaking release. The engine connects over the MCP SDK and builds its own
+# hardened httpx client (SSRF guard), so httpx is a direct dependency here.
 dependencies = [
-    "mcp>=1.26.0",
+    "mcp>=1.26,<2",
+    "httpx>=0.27,<1",
 ]
 
 [project.optional-dependencies]
 # Web + MCP wrapper layers (Steps 2-3). Kept optional so the core engine
 # installs and tests with a minimal footprint.
 service = [
-    "fastapi>=0.111",
-    "uvicorn>=0.30",
+    "fastapi>=0.111,<1",
+    "uvicorn>=0.30,<1",
     # Pinned below 3 to match the version the code is verified against. FastMCP
     # itself recommends pinning below the next major in production.
     "fastmcp>=2.14,<3",
@@ -23,7 +27,6 @@ service = [
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
-    "httpx>=0.27",
 ]
 
 [project.scripts]

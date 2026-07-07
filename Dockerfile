@@ -27,5 +27,11 @@ USER appuser
 
 EXPOSE 9090
 
+# Liveness probe. A wedged-but-alive process fails this, so the orchestrator can
+# see the app is unhealthy instead of forwarding traffic to a dead backend. Uses
+# the stdlib so the slim image needs no extra tools.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD ["python", "-c", "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:9090/health', timeout=3).status == 200 else 1)"]
+
 # One process, all three surfaces: / (UI), /evaluate and /health (REST), /mcp (MCP).
 CMD ["uvicorn", "service.app:app", "--host", "0.0.0.0", "--port", "9090"]

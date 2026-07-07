@@ -11,6 +11,11 @@ services:
     # network at app:9090.
     expose:
       - "9090"
+    # Bound memory and CPU so a burst of slow or large evaluations on this public,
+    # unauthenticated endpoint cannot exhaust the host and take Caddy down with it.
+    mem_limit: 512m
+    cpus: 1.0
+    # The image defines the HEALTHCHECK; Caddy waits for it before starting.
 
   caddy:
     image: caddy:2-alpine
@@ -24,7 +29,8 @@ services:
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
-      - app
+      app:
+        condition: service_healthy
 
 volumes:
   caddy_data:
