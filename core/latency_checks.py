@@ -26,14 +26,28 @@ from typing import Any
 
 from .models import CATEGORY_LATENCY, CheckResult
 
-# Grading thresholds on p95, in milliseconds. Documented so the grade is
-# defensible and tunable. Each entry is (max_p95_ms, score, label).
+# Label thresholds on p95, in milliseconds. Each entry is (max_p95_ms, label).
+# These name the band in the note; the numeric score is interpolated (below) so
+# it slides smoothly rather than jumping at a threshold.
 LATENCY_BANDS = (
-    (300.0, 100.0, "excellent"),
-    (800.0, 85.0, "good"),
-    (2000.0, 65.0, "acceptable"),
-    (5000.0, 40.0, "slow"),
-    (float("inf"), 15.0, "very slow"),
+    (300.0, "excellent"),
+    (800.0, "good"),
+    (2000.0, "acceptable"),
+    (5000.0, "slow"),
+    (float("inf"), "very slow"),
+)
+
+# Score anchors as (p95_ms, score) points. The score is a linear interpolation
+# between neighbouring anchors, so a server sitting near a boundary (say p95 just
+# over 2000 ms) loses a point or two, not a whole band. Anchors line up with the
+# label thresholds above, so the wording and the number still agree.
+LATENCY_ANCHORS = (
+    (0.0, 100.0),
+    (300.0, 100.0),
+    (800.0, 85.0),
+    (2000.0, 65.0),
+    (5000.0, 40.0),
+    (10000.0, 15.0),
 )
 
 # p95 at or below this passes the hard reliability gate.
@@ -78,6 +92,18 @@ def compute_percentiles(samples: list[float]) -> dict[str, float]:
     }
 
 
+def _interpolate_score(p95_ms: float) -> float:
+    """Linearly interpolate the latency score from the anchor points."""
+    anchors = LATENCY_ANCHORS
+    if p95_ms <= anchors[0][0]:
+        return anchors[0][1]
+    for (x0, y0), (x1, y1) in zip(anchors, anchors[1:]):
+        if p95_ms <= x1:
+            t = (p95_ms - x0) / (x1 - x0)
+            return y0 + t * (y1 - y0)
+    return anchors[-1][1]  # beyond the last anchor, hold the floor
+
+
 def grade_latency(p50_ms: float, p95_ms: float, rounds: int) -> CheckResult:
     """Grade latency from p50 / p95 in milliseconds.
 
@@ -89,11 +115,10 @@ def grade_latency(p50_ms: float, p95_ms: float, rounds: int) -> CheckResult:
     Returns:
         A :class:`CheckResult` in the ``latency`` category.
     """
-    score = 15.0
+    score = _interpolate_score(p95_ms)
     label = "very slow"
-    for max_p95, band_score, band_label in LATENCY_BANDS:
+    for max_p95, band_label in LATENCY_BANDS:
         if p95_ms <= max_p95:
-            score = band_score
             label = band_label
             break
 

@@ -49,6 +49,14 @@ def test_grade_latency_slow_fails_gate():
     assert result.details["band"] == "slow"
 
 
+def test_grade_latency_is_smooth_across_band_edge():
+    # A server hovering at the 2000 ms edge must not swing scores by a whole band
+    # on normal jitter; the interpolated score changes only slightly.
+    just_under = grade_latency(900, 1980, rounds=8).score
+    just_over = grade_latency(900, 2020, rounds=8).score
+    assert abs(just_under - just_over) < 3
+
+
 def test_grade_latency_variance_penalty():
     # Fast median but a long tail (p95 = 10x p50) triggers the penalty.
     steady = grade_latency(50, 60, rounds=6).score
