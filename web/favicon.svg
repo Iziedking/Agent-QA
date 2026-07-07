@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Agent QA">
+  <rect x="2" y="2" width="28" height="28" rx="7" fill="#0a0b0c" stroke="#2f363a" stroke-width="2"/>
+  <path d="M9 24 C 11.5 17 14 11 17.6 7.4 C 19.6 11 21.2 17 22.8 24" fill="none" stroke="#aeb7bd" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M12 18.6 C 15.5 16.9 19.5 16.9 23.6 18.2" fill="none" stroke="#aeb7bd" stroke-width="2.4" stroke-linecap="round"/>
+</svg>

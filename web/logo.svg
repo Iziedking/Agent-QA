@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 96" role="img" aria-label="Agent QA — proof, not trust">
+  <!-- mark: the cursive Agent QA "A" sealed in the bench panel -->
+  <rect x="16" y="20" width="56" height="56" rx="13" fill="#0a0b0c" stroke="#2f363a" stroke-width="3"/>
+  <rect x="24" y="28" width="40" height="40" rx="8" fill="none" stroke="#20262a" stroke-width="1.5"/>
+  <path d="M34 61 C 36.5 54 39.5 44.5 44 37.5 C 48.5 44.5 51.5 54 54 61 C 55.2 58.9 56.8 59.2 57.4 57.6" fill="none" stroke="#aeb7bd" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M38.5 53 C 42 51.6 46.5 51.6 51 53" fill="none" stroke="#aeb7bd" stroke-width="4" stroke-linecap="round"/>
+
+  <!-- wordmark -->
+  <text x="92" y="52" font-family="Orbitron, 'IBM Plex Mono', ui-monospace, monospace" font-weight="700" font-size="34" letter-spacing="1.5" fill="#e9ecee">AGENT<tspan fill="#aeb7bd">·</tspan>QA</text>
+  <text x="94" y="72" font-family="'IBM Plex Mono', ui-monospace, monospace" font-weight="500" font-size="10.5" letter-spacing="4.4" fill="#656d72">PROOF, NOT TRUST</text>
+</svg>
