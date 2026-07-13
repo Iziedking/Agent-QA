@@ -24,12 +24,11 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
 from core import __version__ as core_version
-from core.report import evaluate
-from core.reputation import recall_reputation, remember_verdict
-from core.validation import validate_mcp_url
+from core.agent_memory import recall as recall_memory
+from core.agent_memory import remember as remember_memory
 from mcp_server.server import mcp as mcp_instance
 
 # The browser-facing demo UI is a single self-contained file served same-origin,
@@ -117,8 +116,8 @@ class MaxBodySizeMiddleware:
 mcp_app = mcp_instance.http_app(path="/")
 
 app = FastAPI(
-    title="Agent QA",
-    description="Automated reliability reports for public MCP endpoints.",
+    title="Portable Agent Memory",
+    description="A private, portable memory for agents, on Walrus.",
     version=core_version,
     lifespan=mcp_app.lifespan,
 )
@@ -127,31 +126,34 @@ app = FastAPI(
 app.add_middleware(MaxBodySizeMiddleware, max_bytes=MAX_BODY_BYTES)
 
 
-class EvaluateRequest(BaseModel):
-    """Request body for ``POST /evaluate``."""
+class RememberRequest(BaseModel):
+    """Request body for ``POST /remember``."""
 
-    endpoint_url: str = Field(
-        ...,
-        max_length=2048,
-        description="Public URL of the MCP endpoint to evaluate.",
-        examples=["https://example.com/mcp"],
-    )
+    user_key: str = Field(..., max_length=256, examples=["ada@example.com"])
+    passphrase: str = Field(..., max_length=512)
+    content: str = Field(..., max_length=8192)
+    folder: str = Field("", max_length=256)
 
-    @field_validator("endpoint_url")
-    @classmethod
-    def _must_be_http_url(cls, value: str) -> str:
-        return validate_mcp_url(value)
+
+class RecallRequest(BaseModel):
+    """Request body for ``POST /recall``."""
+
+    user_key: str = Field(..., max_length=256)
+    passphrase: str = Field(..., max_length=512)
+    query: str = Field(..., max_length=2048)
+    folder: str = Field("", max_length=256)
+    limit: int = Field(8, ge=1, le=50)
 
 
 class HealthResponse(BaseModel):
     status: str = "ok"
-    service: str = "agent-qa"
+    service: str = "agent-memory"
     version: str = core_version
 
 
 @app.get("/", include_in_schema=False)
 async def index() -> FileResponse:
-    """Serve the browser-facing demo UI (the Reliability Bench)."""
+    """Serve the browser-facing demo UI."""
     return FileResponse(WEB_DIR / "index.html")
 
 
@@ -161,31 +163,28 @@ async def health() -> HealthResponse:
     return HealthResponse()
 
 
-@app.post("/evaluate", tags=["evaluation"])
-async def evaluate_endpoint(request: EvaluateRequest) -> dict:
-    """Evaluate an MCP endpoint and return its reliability report.
+@app.post("/remember", tags=["memory"])
+async def remember_endpoint(request: RememberRequest) -> dict:
+    """Store one item, encrypted, in a user's private folder on Walrus.
 
-    The response is the report object rendered as JSON (see
-    :meth:`core.models.Report.to_dict`). A malformed request body yields a
-    ``422`` from FastAPI's validation before the engine runs.
+    Returns whether it was stored. A malformed body yields a ``422`` from
+    FastAPI's validation before anything runs.
     """
-    report = await evaluate(request.endpoint_url)
-    # Remember the verdict so this endpoint accrues a track record. Fire and
-    # forget: it runs in the background and never blocks or breaks the response.
-    remember_verdict(report)
-    return report.to_dict()
+    return await remember_memory(
+        request.user_key, request.passphrase, request.content, request.folder
+    )
 
 
-@app.get("/reputation", tags=["reputation"])
-async def reputation(q: str, limit: int = 6) -> dict:
-    """Recall an MCP endpoint's remembered reliability track record.
+@app.post("/recall", tags=["memory"])
+async def recall_endpoint(request: RecallRequest) -> dict:
+    """Recall and decrypt relevant items from a user's folder.
 
-    ``q`` is the endpoint URL or a question about it. Returns the verdicts Agent
-    QA has recorded over time, from the shared reputation memory on Walrus. An
-    empty ``records`` list means nothing is remembered yet, or the memory layer
-    is not configured (see ``memory_enabled``).
+    An empty ``records`` list means nothing relevant is remembered yet, the
+    passphrase is wrong, or the memory layer is not configured (``memory_enabled``).
     """
-    recalled = await recall_reputation(q, limit=max(1, min(20, limit)))
+    recalled = await recall_memory(
+        request.user_key, request.passphrase, request.query, request.folder, request.limit
+    )
     return {
         "query": recalled["query"],
         "records": recalled["records"],

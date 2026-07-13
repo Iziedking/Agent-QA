@@ -1,23 +1,13 @@
-"""Tests for the FastAPI service layer (Step 2).
+"""Tests for the FastAPI service layer.
 
-The engine itself is covered elsewhere; here we verify the HTTP contract only,
-with ``core.report.evaluate`` patched so the tests are fast and deterministic.
+The memory client is patched so the tests are fast and deterministic. Here we
+verify the HTTP contract only.
 """
 
-import core.report as report_mod
 import service.app as app_mod
-from core.connect import connection_failed_result, connection_success_result
-from core.models import CATEGORY_CONNECTION, CheckResult
-from core.report import assemble_report
 from fastapi.testclient import TestClient
 
 client = TestClient(app_mod.app)
-
-
-def _healthy_report(url: str):
-    conn = connection_success_result("streamable-http", 1)
-    latency = CheckResult("latency", "round-trip", True, 100.0, "fast")
-    return assemble_report(url, conn, latency, tools=[])
 
 
 def test_health_ok():
@@ -25,82 +15,45 @@ def test_health_ok():
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "ok"
-    assert body["service"] == "agent-qa"
+    assert body["service"] == "agent-memory"
 
 
-def test_evaluate_returns_report(monkeypatch):
-    async def fake_evaluate(url):
-        return _healthy_report(url)
+def test_remember_stores(monkeypatch):
+    async def fake_remember(user_key, passphrase, content, folder=""):
+        return {"stored": True, "enabled": True}
 
-    monkeypatch.setattr(app_mod, "evaluate", fake_evaluate)
+    monkeypatch.setattr(app_mod, "remember_memory", fake_remember)
+    resp = client.post(
+        "/remember",
+        json={"user_key": "ada@example.com", "passphrase": "s3cret", "content": "prefers dark mode"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["stored"] is True
 
-    resp = client.post("/evaluate", json={"endpoint_url": "https://good.example/mcp"})
+
+def test_remember_rejects_missing_fields():
+    assert client.post("/remember", json={"user_key": "ada", "content": "x"}).status_code == 422
+    assert client.post("/remember", json={"passphrase": "p", "content": "x"}).status_code == 422
+
+
+def test_recall_returns_records(monkeypatch):
+    async def fake_recall(user_key, passphrase, query, folder="", limit=8):
+        return {"query": query, "enabled": True, "records": ["prefers dark mode"]}
+
+    monkeypatch.setattr(app_mod, "recall_memory", fake_recall)
+    resp = client.post(
+        "/recall",
+        json={"user_key": "ada@example.com", "passphrase": "s3cret", "query": "what do I prefer"},
+    )
     assert resp.status_code == 200
     body = resp.json()
-    assert body["url"] == "https://good.example/mcp"
-    assert body["reachable"] is True
-    assert body["grade"] in {"A", "B", "C", "D", "F"}
-    assert "category_scores" in body
-
-
-def test_evaluate_unreachable_is_200_with_grade_f(monkeypatch):
-    async def fake_evaluate(url):
-        report = assemble_report(
-            url, connection_failed_result("no route"), latency=None, tools=[]
-        )
-        report.error = "no route"
-        return report
-
-    monkeypatch.setattr(app_mod, "evaluate", fake_evaluate)
-
-    resp = client.post("/evaluate", json={"endpoint_url": "https://dead.example/mcp"})
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["reachable"] is False
-    assert body["grade"] == "F"
-    assert body["error"] == "no route"
-
-
-def test_evaluate_remembers_the_verdict(monkeypatch):
-    async def fake_evaluate(url):
-        return _healthy_report(url)
-
-    remembered = {}
-    monkeypatch.setattr(app_mod, "evaluate", fake_evaluate)
-    monkeypatch.setattr(app_mod, "remember_verdict", lambda r: remembered.update(url=r.url))
-
-    resp = client.post("/evaluate", json={"endpoint_url": "https://good.example/mcp"})
-    assert resp.status_code == 200
-    assert remembered.get("url") == "https://good.example/mcp"
-
-
-def test_reputation_endpoint_returns_records(monkeypatch):
-    async def fake_recall(q, limit=6):
-        return {"query": q, "enabled": True, "records": ["svc graded A 92/100"]}
-
-    monkeypatch.setattr(app_mod, "recall_reputation", fake_recall)
-    resp = client.get("/reputation", params={"q": "is svc reliable"})
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["records"] == ["svc graded A 92/100"]
+    assert body["records"] == ["prefers dark mode"]
     assert body["memory_enabled"] is True
 
 
-def test_evaluate_rejects_non_http_url():
-    resp = client.post("/evaluate", json={"endpoint_url": "ftp://nope"})
-    assert resp.status_code == 422
-
-
-def test_evaluate_rejects_missing_url():
-    resp = client.post("/evaluate", json={})
-    assert resp.status_code == 422
-
-
-def test_evaluate_rejects_overlong_url():
-    resp = client.post(
-        "/evaluate", json={"endpoint_url": "https://example.com/" + "a" * 3000}
-    )
-    assert resp.status_code == 422
+def test_recall_requires_params():
+    # Missing the required fields yields a 422.
+    assert client.post("/recall", json={}).status_code == 422
 
 
 def test_body_size_middleware_rejects_large_body():
