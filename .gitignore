@@ -52,6 +52,9 @@ htmlcov/
 .env.*
 *.local
 
+# Local MCP client config carries the user's identity; keep it out of the repo.
+.mcp.json
+
 # ---- Editors / OS ----
 .vscode/
 .idea/
