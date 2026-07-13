@@ -1,84 +1,81 @@
-"""Tests for the FastMCP server layer (Step 3).
+"""Tests for the FastMCP memory server.
 
-Covers the tool's behavior and a self-consistency check: Agent QA's own tool
-must pass Agent QA's own schema and description quality checks.
+Covers the two tools' behavior and a self-consistency check: the memory tools
+should themselves pass the schema and description quality checks, so an AI can
+pick and call them correctly.
 """
 
 import pytest
 
 import mcp_server.server as srv
-from core.connect import connection_success_result
 from core.description_checks import score_tool_description
-from core.models import CheckResult
-from core.report import assemble_report
 from core.schema_checks import check_tool_schema
-from mcp_server.server import evaluate_mcp_endpoint, mcp, recall_tool_reputation
+from mcp_server.server import mcp, recall, remember
 
 
-def _report(url):
-    conn = connection_success_result("streamable-http", 1)
-    latency = CheckResult("latency", "round-trip", True, 100.0, "fast")
-    return assemble_report(url, conn, latency, tools=[])
+def _identity(monkeypatch, user="ada@example.com", passphrase="s3cret"):
+    monkeypatch.setattr(srv, "_get_identity", lambda: (user, passphrase))
 
 
-async def test_tool_returns_report_dict(monkeypatch):
-    async def fake_evaluate(url):
-        return _report(url)
+async def test_remember_tool_stores(monkeypatch):
+    captured = {}
+    _identity(monkeypatch)
 
-    monkeypatch.setattr(srv, "evaluate", fake_evaluate)
+    async def fake_remember(user_key, passphrase, content, folder=""):
+        captured.update(user=user_key, passphrase=passphrase, content=content, folder=folder)
+        return {"stored": True, "enabled": True}
 
-    result = await evaluate_mcp_endpoint("https://good.example/mcp")
-    assert isinstance(result, dict)
-    assert result["url"] == "https://good.example/mcp"
-    assert result["grade"] in {"A", "B", "C", "D", "F"}
-    assert "category_scores" in result
-
-
-async def test_tool_rejects_bad_url():
-    with pytest.raises(ValueError):
-        await evaluate_mcp_endpoint("ftp://not-allowed")
-
-
-async def test_evaluate_remembers_the_verdict(monkeypatch):
-    async def fake_evaluate(url):
-        return _report(url)
-
-    remembered = {}
-    monkeypatch.setattr(srv, "evaluate", fake_evaluate)
-    monkeypatch.setattr(srv, "remember_verdict", lambda report: remembered.update(url=report.url))
-
-    await evaluate_mcp_endpoint("https://good.example/mcp")
-    assert remembered.get("url") == "https://good.example/mcp"
+    monkeypatch.setattr(srv, "remember_memory", fake_remember)
+    out = await remember("prefers dark mode", "project-x")
+    assert out["stored"] is True
+    assert captured == {
+        "user": "ada@example.com", "passphrase": "s3cret",
+        "content": "prefers dark mode", "folder": "project-x",
+    }
 
 
 async def test_recall_tool_returns_records(monkeypatch):
-    async def fake_recall(query, limit=6):
-        return {"query": query, "enabled": True, "records": ["svc graded A 92/100"]}
+    _identity(monkeypatch)
 
-    monkeypatch.setattr(srv, "recall_reputation", fake_recall)
-    out = await recall_tool_reputation("is svc reliable")
-    assert out["records"] == ["svc graded A 92/100"]
+    async def fake_recall(user_key, passphrase, query, folder=""):
+        return {"query": query, "enabled": True, "records": ["prefers dark mode"]}
+
+    monkeypatch.setattr(srv, "recall_memory", fake_recall)
+    out = await recall("what do I prefer", "project-x")
+    assert out["records"] == ["prefers dark mode"]
     assert out["memory_enabled"] is True
-    assert "Found" in out["note"]
+    assert "Recalled" in out["note"]
 
 
-async def test_recall_tool_graceful_when_memory_disabled(monkeypatch):
-    async def fake_recall(query, limit=6):
+async def test_recall_tool_graceful_when_memory_off(monkeypatch):
+    _identity(monkeypatch)
+
+    async def fake_recall(user_key, passphrase, query, folder=""):
         return {"query": query, "enabled": False, "records": []}
 
-    monkeypatch.setattr(srv, "recall_reputation", fake_recall)
-    out = await recall_tool_reputation("anything")
+    monkeypatch.setattr(srv, "recall_memory", fake_recall)
+    out = await recall("anything")
     assert out["memory_enabled"] is False
-    assert "not configured" in out["note"]
+    assert "not configured on the server" in out["note"]
 
 
-async def test_tool_is_registered():
+async def test_tools_require_configured_identity(monkeypatch):
+    # With no headers configured, the tools must not call the backend and must
+    # tell the user to configure their identity, never leaking anything.
+    monkeypatch.setattr(srv, "_get_identity", lambda: ("", ""))
+    r = await remember("something")
+    assert r["stored"] is False and "X-Memory-User" in r["note"]
+    q = await recall("something")
+    assert q["memory_enabled"] is False and "X-Memory-User" in q["note"]
+
+
+async def test_tools_are_registered():
     tools = await mcp.get_tools()
-    assert "evaluate_mcp_endpoint" in tools
-    assert "recall_tool_reputation" in tools
+    assert "remember" in tools
+    assert "recall" in tools
 
 
-async def _tool_as_dict(name="evaluate_mcp_endpoint"):
+async def _tool_as_dict(name):
     tools = await mcp.get_tools()
     mcp_tool = tools[name].to_mcp_tool()
     return {
@@ -88,15 +85,15 @@ async def _tool_as_dict(name="evaluate_mcp_endpoint"):
     }
 
 
-@pytest.mark.parametrize("name", ["evaluate_mcp_endpoint", "recall_tool_reputation"])
+@pytest.mark.parametrize("name", ["remember", "recall"])
 async def test_own_tools_pass_description_check(name):
     tool = await _tool_as_dict(name)
     result = score_tool_description(tool)
-    assert result.passed, f"Agent QA tool {name} failed its own description check: {result.note}"
+    assert result.passed, f"tool {name} failed its own description check: {result.note}"
 
 
-@pytest.mark.parametrize("name", ["evaluate_mcp_endpoint", "recall_tool_reputation"])
+@pytest.mark.parametrize("name", ["remember", "recall"])
 async def test_own_tools_pass_schema_check(name):
     tool = await _tool_as_dict(name)
     result = check_tool_schema(tool)
-    assert result.passed, f"Agent QA tool {name} failed its own schema check: {result.note}"
+    assert result.passed, f"tool {name} failed its own schema check: {result.note}"
