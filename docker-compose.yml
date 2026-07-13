@@ -1,4 +1,4 @@
-# Three services on one host: the app, the reputation memory sidecar, and Caddy
+# Three services on one host: the app, the memory sidecar, and Caddy
 # in front. Caddy is the only service exposed to the internet. It terminates
 # HTTPS and forwards to the app over the internal network, so the app never
 # speaks TLS and never publishes a port to the host. The memory sidecar is
@@ -17,9 +17,9 @@ services:
     mem_limit: 512m
     cpus: 1.0
     environment:
-      # Where the reputation memory lives. The app degrades gracefully if it is
+      # Where the memory sidecar lives. The app degrades gracefully if it is
       # unreachable, so this is a soft dependency.
-      - AGENT_QA_MEMORY_URL=http://memory:4000
+      - AGENT_MEMORY_URL=http://memory:4000
     depends_on:
       - memory
     # The image defines the HEALTHCHECK; Caddy waits for it before starting.
@@ -31,7 +31,7 @@ services:
       - "4000"
     # MemWal credentials come from the environment or a gitignored .env file next
     # to this compose file. Without them the sidecar runs but stores nothing, and
-    # the app still grades as usual.
+    # the app reports memory as unavailable instead of failing.
     environment:
       - MEMWAL_PRIVATE_KEY=${MEMWAL_PRIVATE_KEY:-}
       - MEMWAL_ACCOUNT_ID=${MEMWAL_ACCOUNT_ID:-}

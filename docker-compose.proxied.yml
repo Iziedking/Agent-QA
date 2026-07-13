@@ -21,7 +21,7 @@ services:
     # No published ports. The ingress Caddy reaches this at agentqa-app:9090 on
     # the shared edge network; the app talks to memory on the internal network.
     environment:
-      - AGENT_QA_MEMORY_URL=http://agentqa-memory:4000
+      - AGENT_MEMORY_URL=http://agentqa-memory:4000
     depends_on:
       - memory
     mem_limit: 512m
