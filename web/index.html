@@ -662,9 +662,29 @@
   }
 }</pre>
             </div>
-            <h3>Cursor</h3>
+            <h3>Codex</h3>
+            <p>With the connector set up, add a local server to <code>~/.codex/config.toml</code>:</p>
             <div class="codeblock">
-              <div class="cbhd"><span>~/.cursor/mcp.json</span><button class="copy" type="button">COPY</button></div>
+              <div class="cbhd"><span>~/.codex/config.toml</span><button class="copy" type="button">COPY</button></div>
+              <pre><span class="fl">[mcp_servers.agent-memory]</span>
+command = "npx"
+args = ["-y", "agent-memory-connect"]</pre>
+            </div>
+            <h3>Cursor</h3>
+            <p>Either launch the connector the same way, or wire headers directly:</p>
+            <div class="codeblock">
+              <div class="cbhd"><span>~/.cursor/mcp.json · via the connector</span><button class="copy" type="button">COPY</button></div>
+              <pre>{
+  <span class="fl">"mcpServers"</span>: {
+    <span class="fl">"agent-memory"</span>: {
+      "command": "npx",
+      "args": ["-y", "agent-memory-connect"]
+    }
+  }
+}</pre>
+            </div>
+            <div class="codeblock">
+              <div class="cbhd"><span>~/.cursor/mcp.json · direct headers</span><button class="copy" type="button">COPY</button></div>
               <pre>{
   <span class="fl">"mcpServers"</span>: {
     <span class="fl">"agent-memory"</span>: {

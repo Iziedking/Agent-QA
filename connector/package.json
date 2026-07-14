@@ -1,6 +1,6 @@
 {
   "name": "agent-memory-connect",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Connect any MCP agent to Portable Agent Memory. Set up once with a blind-typed passphrase stored in the OS keychain; agents then talk to a local proxy that attaches the identity headers, so no secret ever sits in a config file.",
   "type": "module",
   "bin": {
@@ -11,7 +11,7 @@
     "README.md"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=18"
   },
   "keywords": [
     "mcp",

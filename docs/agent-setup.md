@@ -80,9 +80,32 @@ Claude Code reads the memory server's instructions on connect, so it already kno
 
 The hook's output lands in the model's context at the start of every session, so the first thing the agent does is pick up where the last session, on any machine, left off.
 
+## Codex
+
+With the connector set up, add a local server to `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.agent-memory]
+command = "npx"
+args = ["-y", "agent-memory-connect"]
+```
+
 ## Cursor
 
-In `~/.cursor/mcp.json` (or the project's `.cursor/mcp.json`):
+With the connector, launch it the same way:
+
+```json
+{
+  "mcpServers": {
+    "agent-memory": {
+      "command": "npx",
+      "args": ["-y", "agent-memory-connect"]
+    }
+  }
+}
+```
+
+Or wire headers directly in `~/.cursor/mcp.json` (or the project's `.cursor/mcp.json`):
 
 ```json
 {

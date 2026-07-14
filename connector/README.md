@@ -33,6 +33,16 @@ claude mcp add -s user agent-memory -- npx -y agent-memory-connect
 
 `-s user` makes the memory available in every project on the device; drop it to wire only the current project directory.
 
+For Codex, add a local server to `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.agent-memory]
+command = "npx"
+args = ["-y", "agent-memory-connect"]
+```
+
+Any other MCP client that launches local servers uses the generic form: `{ "command": "npx", "args": ["-y", "agent-memory-connect"] }`.
+
 The agent talks to a local MCP proxy over stdio. The proxy reads the passphrase from the credential store at runtime and attaches the identity headers to every HTTPS request to the memory endpoint. Every agent on the device shares the same memory; none of them ever sees the passphrase.
 
 Other commands:

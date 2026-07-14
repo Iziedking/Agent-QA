@@ -27,7 +27,7 @@ const CONFIG_FILE = join(CONFIG_DIR, "config.json");
 // Fallback secret location for machines with no OS credential store (headless
 // servers). Written 0600 and used only with the user's explicit consent.
 const SECRET_FILE = join(CONFIG_DIR, "secret");
-const VERSION = "0.1.2";
+const VERSION = "0.1.3";
 
 // --- config (non-secret: identity and endpoint only) ------------------------
 
@@ -182,16 +182,17 @@ async function setup() {
   const viaNpm = self.includes("node_modules");
   console.log(`\nStored in ${storedIn}. Wire an agent to this device's memory with one line:\n`);
   if (viaNpm) {
-    console.log("  claude mcp add -s user agent-memory -- npx -y agent-memory-connect");
-    console.log("\nOr in any MCP client config that launches local servers:\n");
-    console.log('  { "command": "npx", "args": ["-y", "agent-memory-connect"] }');
+    console.log("  claude code   claude mcp add -s user agent-memory -- npx -y agent-memory-connect");
+    console.log('  codex         [mcp_servers.agent-memory] in ~/.codex/config.toml:');
+    console.log('                command = "npx"  args = ["-y", "agent-memory-connect"]');
+    console.log('  cursor, etc.  { "command": "npx", "args": ["-y", "agent-memory-connect"] }');
   } else {
-    console.log(`  claude mcp add -s user agent-memory -- node "${self}"`);
-    console.log("\nOr in any MCP client config that launches local servers:\n");
-    console.log(`  { "command": "node", "args": ["${self.replace(/\\/g, "\\\\")}"] }`);
+    console.log(`  claude code   claude mcp add -s user agent-memory -- node "${self}"`);
+    console.log(`  cursor, etc.  { "command": "node", "args": ["${self.replace(/\\/g, "\\\\")}"] }`);
   }
   console.log("\n(-s user makes the memory available in every project on this device;");
-  console.log("drop it to wire only the current project.)");
+  console.log("drop it to wire only the current project. Full per-agent guides:");
+  console.log("https://agentsqa.xyz, DOCS, Wire your agent.)");
   console.log("\nEvery agent on this device now shares the same memory, and none");
   console.log("of them ever sees the passphrase.");
 }
