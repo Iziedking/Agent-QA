@@ -89,8 +89,48 @@ async def recall(
             records = body.get("records") or []
             result["records"] = [r for r in records if isinstance(r, str)]
             result["truncated"] = bool(body.get("truncated", False))
+            result["retired"] = bool(body.get("retired", False))
     except Exception:  # noqa: BLE001 - a memory outage must not surface as an error
         pass
+    return result
+
+
+async def forget(user_key: str, passphrase: str, folder: str = "") -> dict[str, Any]:
+    """Forget a folder: the service stops serving its notes, permanently.
+
+    The sidecar verifies the passphrase opens the folder before honouring it,
+    so knowing an identity string alone cannot wipe a folder. The old
+    ciphertext stays on Walrus until it expires; it is simply never served
+    again. Never raises.
+    """
+    result: dict[str, Any] = {"forgotten": False, "enabled": False}
+    if not MEMORY_SVC_URL:
+        result["note"] = "Memory is not configured."
+        return result
+    if not user_key or not passphrase:
+        result["note"] = "A user key and a passphrase are required."
+        return result
+    try:
+        async with httpx.AsyncClient(timeout=REMEMBER_TIMEOUT) as client:
+            resp = await client.post(
+                f"{MEMORY_SVC_URL}/forget",
+                json={"user": user_key, "passphrase": passphrase, "folder": folder},
+            )
+            body = resp.json()
+            if resp.status_code == 403:
+                result["note"] = str(body.get("error") or "The passphrase does not open this folder.")
+                return result
+            resp.raise_for_status()
+            result["enabled"] = bool(body.get("enabled", False))
+            result["forgotten"] = bool(body.get("forgotten", False))
+            if body.get("note"):
+                result["note"] = str(body["note"])
+            elif not result["enabled"]:
+                result["note"] = "Memory backend is not configured on the server."
+            elif not result["forgotten"]:
+                result["note"] = str(body.get("error") or "The forget was not confirmed.")
+    except Exception as exc:  # noqa: BLE001 - the memory layer must never raise into the agent
+        result["note"] = f"Could not reach the memory service: {exc}"
     return result
 
 

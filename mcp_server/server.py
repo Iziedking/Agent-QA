@@ -21,6 +21,7 @@ from fastmcp import FastMCP
 from fastmcp.server.dependencies import get_http_headers
 from pydantic import Field
 
+from core.agent_memory import forget as forget_memory
 from core.agent_memory import recall as recall_memory
 from core.agent_memory import remember as remember_memory
 
@@ -157,6 +158,8 @@ async def recall(
     found = len(result["records"])
     if not result["enabled"]:
         note = "Memory is not configured on the server, so nothing can be recalled yet."
+    elif result.get("retired"):
+        note = "This identity is retired on this server, so nothing can be recalled."
     elif found:
         note = f"Recalled {found} relevant item(s) from the user's memory."
     else:
@@ -172,10 +175,46 @@ async def recall(
     }
 
 
+async def forget(
+    folder: Annotated[
+        str,
+        Field(
+            description=(
+                "The folder to forget: the project or task's folder name. Leave "
+                "empty for the default space."
+            )
+        ),
+    ] = "",
+) -> dict[str, Any]:
+    """Forget a folder of the user's memory, permanently. Confirm with the user first.
+
+    After this, no recall will return the folder's notes again; the folder
+    starts fresh and new notes work immediately. This is irreversible, so call
+    it only when the user explicitly asks to forget or wipe a folder, never on
+    your own judgement. The server verifies the configured passphrase actually
+    opens the folder before honouring it, so an identity string alone cannot
+    wipe anything. Honest semantics: the old encrypted notes stay on Walrus
+    until their storage expires, sealed under the passphrase; they are simply
+    never served again.
+    """
+    user_key, passphrase = _get_identity()
+    if not user_key or not passphrase:
+        return {"forgotten": False, "memory_enabled": False, "note": _CONFIGURE}
+    result = await forget_memory(user_key, passphrase, folder)
+    out: dict[str, Any] = {
+        "forgotten": result["forgotten"],
+        "memory_enabled": result["enabled"],
+    }
+    if result.get("note"):
+        out["note"] = result["note"]
+    return out
+
+
 # Register the tools while keeping the functions plain callables, so they can be
 # unit tested directly without going through the transport.
 mcp.tool(remember)
 mcp.tool(recall)
+mcp.tool(forget)
 
 
 def run() -> None:

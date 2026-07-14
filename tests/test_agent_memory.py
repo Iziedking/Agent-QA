@@ -24,9 +24,10 @@ class _FakeResp:
 class _FakeClient:
     posts: list[dict] = []
 
-    def __init__(self, *args, resp=None, fail=False, **kwargs):
+    def __init__(self, *args, resp=None, fail=False, status=200, **kwargs):
         self._resp = resp if resp is not None else {"ok": True, "enabled": True}
         self._fail = fail
+        self._status = status
 
     async def __aenter__(self):
         return self
@@ -38,7 +39,7 @@ class _FakeClient:
         if self._fail:
             raise RuntimeError("sidecar down")
         _FakeClient.posts.append(json)
-        return _FakeResp(self._resp)
+        return _FakeResp(self._resp, status=self._status)
 
     async def get(self, url, params=None):
         if self._fail:
@@ -142,3 +143,44 @@ async def test_recall_disabled_without_url(monkeypatch):
     monkeypatch.setattr(mem, "MEMORY_SVC_URL", "")
     out = await mem.recall("ada", "s3cret", "anything")
     assert out["enabled"] is False and out["records"] == []
+
+
+async def test_recall_passes_retired_through(monkeypatch):
+    monkeypatch.setattr(mem, "MEMORY_SVC_URL", "http://memory:4000")
+    monkeypatch.setattr(
+        mem.httpx, "AsyncClient",
+        _factory(resp={"enabled": True, "records": [], "retired": True}),
+    )
+    out = await mem.recall("old@example.com", "s3cret", "anything")
+    assert out["retired"] is True and out["records"] == []
+
+
+async def test_forget_reports_success(monkeypatch):
+    _FakeClient.posts = []
+    monkeypatch.setattr(mem, "MEMORY_SVC_URL", "http://memory:4000")
+    monkeypatch.setattr(mem.httpx, "AsyncClient", _factory(resp={"forgotten": True, "enabled": True}))
+    out = await mem.forget("ada@example.com", "s3cret", "project-x")
+    assert out["forgotten"] is True and out["enabled"] is True
+    assert _FakeClient.posts == [
+        {"user": "ada@example.com", "passphrase": "s3cret", "folder": "project-x"}
+    ]
+
+
+async def test_forget_rejected_on_wrong_passphrase(monkeypatch):
+    # A 403 from the sidecar (proof of key failed) must surface as not
+    # forgotten with the reason, never as an exception.
+    monkeypatch.setattr(mem, "MEMORY_SVC_URL", "http://memory:4000")
+    monkeypatch.setattr(
+        mem.httpx, "AsyncClient",
+        _factory(resp={"error": "The passphrase does not open this folder, so it cannot forget it."}, status=403),
+    )
+    out = await mem.forget("ada", "wrong", "project-x")
+    assert out["forgotten"] is False
+    assert "does not open this folder" in out["note"]
+
+
+async def test_forget_graceful_when_down(monkeypatch):
+    monkeypatch.setattr(mem, "MEMORY_SVC_URL", "http://memory:4000")
+    monkeypatch.setattr(mem.httpx, "AsyncClient", _factory(fail=True))
+    out = await mem.forget("ada", "s3cret")
+    assert out["forgotten"] is False and "note" in out

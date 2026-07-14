@@ -27,6 +27,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from core import __version__ as core_version
+from core.agent_memory import forget as forget_memory
 from core.agent_memory import recall as recall_memory
 from core.agent_memory import remember as remember_memory
 from mcp_server.server import mcp as mcp_instance
@@ -145,6 +146,14 @@ class RecallRequest(BaseModel):
     limit: int = Field(8, ge=1, le=50)
 
 
+class ForgetRequest(BaseModel):
+    """Request body for ``POST /forget``."""
+
+    user_key: str = Field(..., max_length=256)
+    passphrase: str = Field(..., max_length=512)
+    folder: str = Field("", max_length=256)
+
+
 class HealthResponse(BaseModel):
     status: str = "ok"
     service: str = "agent-memory"
@@ -190,7 +199,18 @@ async def recall_endpoint(request: RecallRequest) -> dict:
         "records": recalled["records"],
         "memory_enabled": recalled["enabled"],
         "truncated": bool(recalled.get("truncated", False)),
+        "retired": bool(recalled.get("retired", False)),
     }
+
+
+@app.post("/forget", tags=["memory"])
+async def forget_endpoint(request: ForgetRequest) -> dict:
+    """Forget a folder: the service stops serving its notes, permanently.
+
+    The memory service verifies the passphrase opens the folder before
+    honouring the request, so an identity string alone cannot wipe anything.
+    """
+    return await forget_memory(request.user_key, request.passphrase, request.folder)
 
 
 # Mount the MCP endpoint last, so the explicit routes above take precedence and

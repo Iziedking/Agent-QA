@@ -10,7 +10,7 @@ import pytest
 import mcp_server.server as srv
 from core.description_checks import score_tool_description
 from core.schema_checks import check_tool_schema
-from mcp_server.server import mcp, recall, remember
+from mcp_server.server import forget, mcp, recall, remember
 
 
 def _identity(monkeypatch, user="ada@example.com", passphrase="s3cret"):
@@ -97,6 +97,44 @@ async def test_recall_tool_graceful_when_memory_off(monkeypatch):
     assert "not configured on the server" in out["note"]
 
 
+async def test_recall_tool_reports_retired_identity(monkeypatch):
+    _identity(monkeypatch)
+
+    async def fake_recall(user_key, passphrase, query, folder=""):
+        return {"query": query, "enabled": True, "records": [], "retired": True}
+
+    monkeypatch.setattr(srv, "recall_memory", fake_recall)
+    out = await recall("anything")
+    assert out["records"] == []
+    assert "retired" in out["note"]
+
+
+async def test_forget_tool_forwards_folder(monkeypatch):
+    captured = {}
+    _identity(monkeypatch)
+
+    async def fake_forget(user_key, passphrase, folder=""):
+        captured.update(user=user_key, passphrase=passphrase, folder=folder)
+        return {"forgotten": True, "enabled": True}
+
+    monkeypatch.setattr(srv, "forget_memory", fake_forget)
+    out = await forget("project-x")
+    assert out["forgotten"] is True
+    assert captured == {"user": "ada@example.com", "passphrase": "s3cret", "folder": "project-x"}
+
+
+async def test_forget_tool_surfaces_refusal(monkeypatch):
+    _identity(monkeypatch)
+
+    async def fake_forget(user_key, passphrase, folder=""):
+        return {"forgotten": False, "enabled": True, "note": "The passphrase does not open this folder."}
+
+    monkeypatch.setattr(srv, "forget_memory", fake_forget)
+    out = await forget("project-x")
+    assert out["forgotten"] is False
+    assert "does not open this folder" in out["note"]
+
+
 async def test_tools_require_configured_identity(monkeypatch):
     # With no headers configured, the tools must not call the backend and must
     # tell the user to configure their identity, never leaking anything.
@@ -105,12 +143,15 @@ async def test_tools_require_configured_identity(monkeypatch):
     assert r["stored"] is False and "X-Memory-User" in r["note"]
     q = await recall("something")
     assert q["memory_enabled"] is False and "X-Memory-User" in q["note"]
+    f = await forget("something")
+    assert f["forgotten"] is False and "X-Memory-User" in f["note"]
 
 
 async def test_tools_are_registered():
     tools = await mcp.get_tools()
     assert "remember" in tools
     assert "recall" in tools
+    assert "forget" in tools
 
 
 async def _tool_as_dict(name):
@@ -123,14 +164,14 @@ async def _tool_as_dict(name):
     }
 
 
-@pytest.mark.parametrize("name", ["remember", "recall"])
+@pytest.mark.parametrize("name", ["remember", "recall", "forget"])
 async def test_own_tools_pass_description_check(name):
     tool = await _tool_as_dict(name)
     result = score_tool_description(tool)
     assert result.passed, f"tool {name} failed its own description check: {result.note}"
 
 
-@pytest.mark.parametrize("name", ["remember", "recall"])
+@pytest.mark.parametrize("name", ["remember", "recall", "forget"])
 async def test_own_tools_pass_schema_check(name):
     tool = await _tool_as_dict(name)
     result = check_tool_schema(tool)
