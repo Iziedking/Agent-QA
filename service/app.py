@@ -200,6 +200,7 @@ async def recall_endpoint(request: RecallRequest) -> dict:
         "memory_enabled": recalled["enabled"],
         "truncated": bool(recalled.get("truncated", False)),
         "retired": bool(recalled.get("retired", False)),
+        "locked": bool(recalled.get("locked", False)),
     }
 
 

@@ -109,6 +109,21 @@ async def test_recall_tool_reports_retired_identity(monkeypatch):
     assert "retired" in out["note"]
 
 
+async def test_recall_tool_warns_on_wrong_passphrase(monkeypatch):
+    # A locked folder must read as "wrong passphrase", never as "empty memory",
+    # or an agent on a freshly set-up device silently starts from zero.
+    _identity(monkeypatch)
+
+    async def fake_recall(user_key, passphrase, query, folder=""):
+        return {"query": query, "enabled": True, "records": [], "locked": True}
+
+    monkeypatch.setattr(srv, "recall_memory", fake_recall)
+    out = await recall("anything", "project-x")
+    assert out["locked"] is True
+    assert out["records"] == []
+    assert "passphrase" in out["note"] and "NOT empty" in out["note"]
+
+
 async def test_forget_tool_forwards_folder(monkeypatch):
     captured = {}
     _identity(monkeypatch)

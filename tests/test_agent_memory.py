@@ -155,6 +155,17 @@ async def test_recall_passes_retired_through(monkeypatch):
     assert out["retired"] is True and out["records"] == []
 
 
+async def test_recall_passes_locked_through(monkeypatch):
+    # Items exist but none decrypt: a wrong passphrase, not an empty memory.
+    monkeypatch.setattr(mem, "MEMORY_SVC_URL", "http://memory:4000")
+    monkeypatch.setattr(
+        mem.httpx, "AsyncClient",
+        _factory(resp={"enabled": True, "records": [], "locked": True}),
+    )
+    out = await mem.recall("ada", "wrong-pass", "anything")
+    assert out["locked"] is True and out["records"] == []
+
+
 async def test_forget_reports_success(monkeypatch):
     _FakeClient.posts = []
     monkeypatch.setattr(mem, "MEMORY_SVC_URL", "http://memory:4000")

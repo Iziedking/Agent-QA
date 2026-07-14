@@ -160,6 +160,13 @@ async def recall(
         note = "Memory is not configured on the server, so nothing can be recalled yet."
     elif result.get("retired"):
         note = "This identity is retired on this server, so nothing can be recalled."
+    elif result.get("locked"):
+        note = (
+            "This folder holds notes, but the configured passphrase does not open "
+            "any of them. The passphrase is almost certainly wrong; the memory is "
+            "NOT empty. Tell the user to fix X-Memory-Passphrase in the MCP "
+            "configuration, or to re-run the connector setup, before continuing."
+        )
     elif found:
         note = f"Recalled {found} relevant item(s) from the user's memory."
     else:
@@ -171,6 +178,7 @@ async def recall(
         "records": result["records"],
         "memory_enabled": result["enabled"],
         "truncated": bool(result.get("truncated", False)),
+        "locked": bool(result.get("locked", False)),
         "note": note,
     }
 

@@ -90,6 +90,7 @@ async def recall(
             result["records"] = [r for r in records if isinstance(r, str)]
             result["truncated"] = bool(body.get("truncated", False))
             result["retired"] = bool(body.get("retired", False))
+            result["locked"] = bool(body.get("locked", False))
     except Exception:  # noqa: BLE001 - a memory outage must not surface as an error
         pass
     return result

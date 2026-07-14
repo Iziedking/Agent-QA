@@ -292,6 +292,10 @@ const server = createServer(async (req, res) => {
         scanned: items.length,
         total,
         truncated: total > blobs.length,
+        // The folder holds notes but this passphrase opens none of them: a
+        // wrong passphrase, not an empty memory. Callers must not confuse
+        // the two, so the difference is stated explicitly.
+        locked: blobs.length > 0 && items.length === 0,
       });
     }
 
