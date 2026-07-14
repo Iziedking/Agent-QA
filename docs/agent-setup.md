@@ -166,6 +166,8 @@ A trading agent, a wallet rescue agent, or a support agent does not need MCP to 
 
 A note like "2026-07-14: bought 0.5 ETH at 3,842 USDC on OKX DEX, stop at 3,690, tx 0x8f3a...c21, reason: breakout above 3,800 with volume" recalls extremely well, because trading is full of hard tokens: symbols, amounts, hashes, price levels.
 
+A complete runnable example lives at [examples/trading_agent.py](../examples/trading_agent.py): a stateless paper-trading agent, standard library only, that wakes up remembering its position and its own past trades from the portable memory, decides, and remembers each action with its receipt. Run it twice and the second run continues the first; run it on a different machine and it still does.
+
 ## Self-hosting
 
 The whole stack is two containers: the app (UI, REST, and the MCP endpoint on one port) and the memory sidecar that encrypts and talks to Walrus. `docker-compose.yml` runs it with its own Caddy for HTTPS; `docker-compose.proxied.yml` runs it behind an ingress proxy you already have. The sidecar needs `MEMWAL_PRIVATE_KEY` and `MEMWAL_ACCOUNT_ID` in a gitignored `.env`. Your agents then point at your domain instead of agentsqa.xyz, and nothing about the memory changes: it is still encrypted under each user's passphrase before it leaves the box.
