@@ -7,11 +7,10 @@ FROM node:20-slim
 ENV NODE_ENV=production
 WORKDIR /svc
 
-# Install dependencies first (the vendored Avow SDK tarball plus its transitive
-# Sui/Walrus deps), so this layer caches until the manifest or vendor changes.
-COPY package.json ./
-COPY vendor ./vendor
-RUN npm install --omit=dev
+# Install dependencies first (the MemWal client and its Sui/Walrus deps), so
+# this layer caches until the manifest changes.
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
 
 COPY server.mjs ./
 

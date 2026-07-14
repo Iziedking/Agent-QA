@@ -9,7 +9,6 @@
     "start": "node server.mjs"
   },
   "dependencies": {
-    "@mysten-incubation/memwal": "^0.0.7",
-    "avow-sdk": "file:vendor/avow-sdk-0.3.1.tgz"
+    "@mysten-incubation/memwal": "^0.0.7"
   }
 }

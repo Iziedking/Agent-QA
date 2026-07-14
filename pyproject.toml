@@ -1,7 +1,7 @@
 [project]
 name = "agent-qa"
 version = "0.1.0"
-description = "Agent QA: automated reliability reports for public MCP endpoints (OKX.AI A2MCP ASP)"
+description = "Agent QA: a private, portable memory for AI agents, encrypted under your passphrase and kept on Walrus (OKX.AI A2MCP ASP)"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }

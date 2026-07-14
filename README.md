@@ -14,7 +14,7 @@ Memory is quality assurance for agents: an agent that remembers its decisions, i
 
 ## What you get
 
-- **Two tools, any agent.** `remember` stores one note; `recall` brings back what is relevant. Any MCP client carries them: Claude Code, Cursor, Codex, or a custom agent.
+- **Three tools, any agent.** `remember` stores one note, `recall` brings back what is relevant, and `forget` retires a folder for good. Any MCP client carries them: Claude Code, Cursor, Codex, or a custom agent.
 - **Real receipts.** A write reports stored only after Walrus confirms it, and returns the blob id it lives under. A failed write says so with the reason; it never pretends.
 - **Folders.** Memory is organised as you, then folders, then notes. One folder per project keeps recall scoped: the coding agent reads `project-x`, the trading agent reads `dex-trading`, and the same person owns both.
 - **Honest recall.** Results are pulled, decrypted transiently, ranked against the query, and returned. When a folder holds more than could be scanned, the reply says so instead of quietly dropping the rest.
