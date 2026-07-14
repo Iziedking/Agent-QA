@@ -67,13 +67,25 @@ POST /recall
 
 The reply carries `records`, the decrypted best matches, and `truncated`, true when the folder holds more than could be scanned.
 
-`GET /health` returns a liveness check. `GET /` serves the console. `/mcp` is the MCP endpoint.
+```
+POST /forget
+{
+  "user_key": "you@example.com",
+  "passphrase": "your-passphrase",
+  "folder": "dex-trading"
+}
+```
+
+Forget retires a folder permanently: no recall returns its notes again, and the folder starts fresh for new writes. It is honoured only when the passphrase actually opens the folder, so an identity string alone cannot wipe anything. Walrus is immutable, so this is revocation rather than erasure: the old ciphertext stays sealed under your passphrase until its storage expires, and the service never serves it again.
+
+`GET /health` returns a liveness check. `GET /` serves the console. `/mcp` is the MCP endpoint with the tools `remember`, `recall`, and `forget`.
 
 ## Ownership, plainly
 
 - The passphrase is the only key. It is sent over HTTPS with each call, used transiently to encrypt or decrypt, and never stored.
 - Lose the passphrase and the memory stays sealed, permanently. A reset path for you would be a reading path for someone else.
 - Each confirmed write returns a Walrus blob id, so a note is not just stored but provable.
+- Forgetting is revocation, not erasure, because immutable storage offers nothing stronger, and we say so. Key destruction is the only true delete.
 - The service in front is stateless. Point your agents at the hosted endpoint or run your own from the published compose files; the memory model does not change.
 
 ## Self-hosting
