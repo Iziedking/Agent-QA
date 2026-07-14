@@ -189,6 +189,7 @@ async def recall_endpoint(request: RecallRequest) -> dict:
         "query": recalled["query"],
         "records": recalled["records"],
         "memory_enabled": recalled["enabled"],
+        "truncated": bool(recalled.get("truncated", False)),
     }
 
 

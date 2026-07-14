@@ -50,8 +50,14 @@ async def remember(
             body = resp.json()
             result["enabled"] = bool(body.get("enabled", False))
             result["stored"] = bool(body.get("ok", False)) and result["enabled"]
+            if result["stored"] and body.get("blob_id"):
+                # The Walrus blob id the sidecar got back when the relayer
+                # confirmed the write: a receipt the caller can surface.
+                result["receipt"] = str(body["blob_id"])
             if not result["enabled"]:
                 result["note"] = "Memory backend is not configured on the server."
+            elif not result["stored"]:
+                result["note"] = str(body.get("error") or "The write was not confirmed.")
     except Exception as exc:  # noqa: BLE001 - the memory layer must never raise into the agent
         result["note"] = f"Could not reach the memory service: {exc}"
     return result
@@ -60,8 +66,12 @@ async def remember(
 async def recall(
     user_key: str, passphrase: str, query: str, folder: str = "", limit: int = 8
 ) -> dict[str, Any]:
-    """Recall relevant items from this user's folder, decrypted. Always well-formed."""
-    result: dict[str, Any] = {"query": query, "enabled": False, "records": []}
+    """Recall relevant items from this user's folder, decrypted. Always well-formed.
+
+    ``truncated`` is True when the folder holds more items than the sidecar
+    could scan, so the caller knows the answer may be incomplete.
+    """
+    result: dict[str, Any] = {"query": query, "enabled": False, "records": [], "truncated": False}
     if not MEMORY_SVC_URL or not user_key or not passphrase or not query:
         return result
     try:
@@ -78,6 +88,7 @@ async def recall(
             result["enabled"] = bool(body.get("enabled", False))
             records = body.get("records") or []
             result["records"] = [r for r in records if isinstance(r, str)]
+            result["truncated"] = bool(body.get("truncated", False))
     except Exception:  # noqa: BLE001 - a memory outage must not surface as an error
         pass
     return result

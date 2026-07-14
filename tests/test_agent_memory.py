@@ -63,6 +63,31 @@ async def test_remember_encrypts_under_user_and_folder(monkeypatch):
     ]
 
 
+async def test_remember_returns_walrus_receipt(monkeypatch):
+    monkeypatch.setattr(mem, "MEMORY_SVC_URL", "http://memory:4000")
+    monkeypatch.setattr(
+        mem.httpx, "AsyncClient",
+        _factory(resp={"ok": True, "enabled": True, "blob_id": "walrus-blob-123"}),
+    )
+    out = await mem.remember("ada", "s3cret", "note")
+    assert out["stored"] is True
+    assert out["receipt"] == "walrus-blob-123"
+
+
+async def test_remember_surfaces_unconfirmed_write(monkeypatch):
+    # An ok:false with a reason (relayer down, write timed out) must reach the
+    # caller as stored:false plus the reason, never a silent success.
+    monkeypatch.setattr(mem, "MEMORY_SVC_URL", "http://memory:4000")
+    monkeypatch.setattr(
+        mem.httpx, "AsyncClient",
+        _factory(resp={"ok": False, "enabled": True, "error": "write not confirmed: timeout"}),
+    )
+    out = await mem.remember("ada", "s3cret", "note")
+    assert out["stored"] is False and out["enabled"] is True
+    assert "write not confirmed" in out["note"]
+    assert "receipt" not in out
+
+
 async def test_remember_reports_when_backend_off(monkeypatch):
     monkeypatch.setattr(mem, "MEMORY_SVC_URL", "http://memory:4000")
     monkeypatch.setattr(mem.httpx, "AsyncClient", _factory(resp={"ok": True, "enabled": False}))
@@ -92,13 +117,25 @@ async def test_recall_parses_records(monkeypatch):
     out = await mem.recall("ada", "s3cret", "what do I prefer", "project-x")
     assert out["enabled"] is True
     assert out["records"] == ["prefers dark mode", "lives in Lagos"]  # non-strings dropped
+    assert out["truncated"] is False
+
+
+async def test_recall_passes_truncation_through(monkeypatch):
+    # When the sidecar could not scan the whole folder, the caller must see it.
+    monkeypatch.setattr(mem, "MEMORY_SVC_URL", "http://memory:4000")
+    monkeypatch.setattr(
+        mem.httpx, "AsyncClient",
+        _factory(resp={"enabled": True, "records": ["a note"], "truncated": True}),
+    )
+    out = await mem.recall("ada", "s3cret", "anything")
+    assert out["truncated"] is True
 
 
 async def test_recall_graceful_when_down(monkeypatch):
     monkeypatch.setattr(mem, "MEMORY_SVC_URL", "http://memory:4000")
     monkeypatch.setattr(mem.httpx, "AsyncClient", _factory(fail=True))
     out = await mem.recall("ada", "s3cret", "anything")
-    assert out == {"query": "anything", "enabled": False, "records": []}
+    assert out == {"query": "anything", "enabled": False, "records": [], "truncated": False}
 
 
 async def test_recall_disabled_without_url(monkeypatch):
