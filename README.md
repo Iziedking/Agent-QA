@@ -32,7 +32,7 @@ claude mcp add --transport http agent-memory https://agentsqa.xyz/mcp \
   --header "X-Memory-Passphrase: your-passphrase"
 ```
 
-For the friendliest path on a new device, the connector in [connector/](connector/) sets up once with a blind-typed passphrase stored in the OS credential store, then wires any agent with one line and no secrets in any config file.
+For the friendliest path on a new device, run `npx agent-memory-connect setup` once: it stores a blind-typed passphrase in the OS credential store, then wires any agent with one line and no secrets in any config file (source in [connector/](connector/)).
 
 Per-agent configuration, a hook that guarantees recall on session start, the builder pattern for giving a single-purpose agent memory, and the note conventions that recall well are all in [docs/agent-setup.md](docs/agent-setup.md).
 

@@ -10,21 +10,19 @@ The user string and passphrase travel as HTTP headers set in your MCP client's c
 
 ## The friendly way: one setup per device
 
-The connector in `connector/` makes a new device a two-minute job with no secrets in any file:
+The connector makes a new device a two-minute job with no secrets in any file:
 
 ```
-cd connector
-npm install
-node bin.mjs setup
+npx agent-memory-connect setup
 ```
 
 It asks for your identity and your passphrase. The passphrase is typed blind, confirmed twice, and stored in the operating system's credential store (Credential Manager on Windows, Keychain on macOS, libsecret on Linux). Setup then prints the one line that wires any agent:
 
 ```
-claude mcp add agent-memory -- node "<path to>/connector/bin.mjs"
+claude mcp add agent-memory -- npx -y agent-memory-connect
 ```
 
-The agent talks to a local proxy over stdio; the proxy reads the passphrase from the credential store at runtime and attaches the headers to every HTTPS call. Every agent on the device shares the same memory, none of them ever sees the passphrase, and nothing secret sits in a config file, an env var, or a shell history. `node bin.mjs status` shows what is configured (never the value); `node bin.mjs reset` removes it.
+The agent talks to a local proxy over stdio; the proxy reads the passphrase from the credential store at runtime and attaches the headers to every HTTPS call. Every agent on the device shares the same memory, none of them ever sees the passphrase, and nothing secret sits in a config file, an env var, or a shell history. `npx agent-memory-connect status` shows what is configured (never the value); `npx agent-memory-connect reset` removes it.
 
 The sections below wire clients directly with headers instead, which works everywhere the connector has not been set up.
 

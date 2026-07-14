@@ -6,10 +6,28 @@
   "bin": {
     "agent-memory": "./bin.mjs"
   },
+  "files": [
+    "bin.mjs",
+    "README.md"
+  ],
   "engines": {
     "node": ">=20"
   },
+  "keywords": [
+    "mcp",
+    "memory",
+    "agent",
+    "walrus",
+    "model-context-protocol"
+  ],
+  "author": "Israel Dominic",
   "license": "MIT",
+  "homepage": "https://agentsqa.xyz",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Iziedking/Agent-QA.git",
+    "directory": "connector"
+  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@napi-rs/keyring": "^1.3.0"

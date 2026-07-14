@@ -119,10 +119,19 @@ async function setup() {
   }
 
   const self = resolve(fileURLToPath(import.meta.url));
+  // Installed from npm (running out of a node_modules) means npx can find us
+  // by name; a repo checkout needs the explicit node path.
+  const viaNpm = self.includes("node_modules");
   console.log("\nStored. Wire an agent to this device's memory with one line:\n");
-  console.log(`  claude mcp add agent-memory -- node "${self}"`);
-  console.log("\nOr in any MCP client config that launches local servers:\n");
-  console.log(`  { "command": "node", "args": ["${self.replace(/\\/g, "\\\\")}"] }`);
+  if (viaNpm) {
+    console.log("  claude mcp add agent-memory -- npx -y agent-memory-connect");
+    console.log("\nOr in any MCP client config that launches local servers:\n");
+    console.log('  { "command": "npx", "args": ["-y", "agent-memory-connect"] }');
+  } else {
+    console.log(`  claude mcp add agent-memory -- node "${self}"`);
+    console.log("\nOr in any MCP client config that launches local servers:\n");
+    console.log(`  { "command": "node", "args": ["${self.replace(/\\/g, "\\\\")}"] }`);
+  }
   console.log("\nEvery agent on this device now shares the same memory, and none");
   console.log("of them ever sees the passphrase.");
 }
