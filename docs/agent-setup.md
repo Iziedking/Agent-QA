@@ -101,7 +101,14 @@ Every note should stand alone for a stranger:
 
 - `remember` returns `stored: true` only after Walrus confirms the write, along with the blob id as a receipt. A failed write says so with the reason; it never pretends.
 - `recall` decrypts, ranks, and returns the best matches. If a folder holds more than could be scanned, `truncated: true` says the answer may be incomplete.
+- `forget` retires a folder permanently: no recall returns its notes again, and the folder starts fresh for new writes. It is honoured only when the supplied passphrase actually decrypts a note in the folder, so knowing someone's identity string alone cannot wipe anything. Agents are instructed to call it only when the user explicitly asks.
 - A wrong passphrase, or someone else's, returns nothing. There is nothing to return; the ciphertext never decrypts.
+
+## Forgetting, honestly
+
+Walrus is immutable storage, so nothing can reach in and erase a written blob; it expires when its paid storage period lapses. `forget` is therefore implemented as revocation, not erasure: each folder carries a generation number, forgetting bumps it, and the service never serves the old generation again. The old ciphertext remains on Walrus until expiry, sealed under your passphrase, unreadable without it. This is the same reason losing your passphrase is permanent: destroyed key, dead data. Deletion by key destruction is the only deletion immutable storage can offer, and we say so rather than pretend otherwise.
+
+Operators have one more lever: `AGENT_MEMORY_RETIRED_USERS`, a comma-separated list of identities the service refuses to serve entirely, for retiring a compromised or abandoned identity. Retired identities get nothing back on recall and cannot write.
 
 ## Self-hosting
 
