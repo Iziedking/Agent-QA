@@ -1,0 +1,17 @@
+{
+  "name": "agent-memory-connect",
+  "version": "0.1.0",
+  "description": "Connect any MCP agent to Portable Agent Memory. Set up once with a blind-typed passphrase stored in the OS keychain; agents then talk to a local proxy that attaches the identity headers, so no secret ever sits in a config file.",
+  "type": "module",
+  "bin": {
+    "agent-memory": "./bin.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@napi-rs/keyring": "^1.3.0"
+  }
+}
