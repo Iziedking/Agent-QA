@@ -13,7 +13,9 @@ npm install
 node bin.mjs setup
 ```
 
-Setup asks for your identity and your passphrase. The passphrase is typed blind, confirmed twice, and stored in the operating system's credential store: Credential Manager on Windows, Keychain on macOS, libsecret on Linux. It never sits in a config file, an env var, or a shell history.
+Setup asks for your identity and your passphrase. The passphrase is typed blind, confirmed twice, and stored in the operating system's credential store: Credential Manager on Windows, Keychain on macOS, the Secret Service on desktop Linux. It never sits in a config file, an env var, or a shell history.
+
+On a headless server with no credential store, setup says so and offers the honest fallback: a file at `~/.agent-memory/secret` readable only by your account (permissions 600), written only with your explicit yes. `status` always tells you which store holds the passphrase.
 
 Then add the printed line to any agent, for example:
 

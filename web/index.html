@@ -621,7 +621,7 @@
               <div class="cbhd"><span>wire any agent</span><button class="copy" type="button">COPY</button></div>
               <pre>claude mcp add agent-memory <span class="fl">--</span> npx -y agent-memory-connect</pre>
             </div>
-            <p>The agent talks to a local proxy; the proxy reads the passphrase from the credential store at request time and attaches the headers. Every agent on the device shares the same memory, and none of them ever sees the passphrase. <code>npx agent-memory-connect status</code> shows what is configured, never the value; <code>reset</code> removes it.</p>
+            <p>The agent talks to a local proxy; the proxy reads the passphrase from the credential store at request time and attaches the headers. Every agent on the device shares the same memory, and none of them ever sees the passphrase. <code>npx agent-memory-connect status</code> shows what is configured, never the value; <code>reset</code> removes it. A headless server with no credential store is told so and offered a fallback file readable only by that account, written only with an explicit yes.</p>
             <p>The sections below wire clients directly with headers instead, which works anywhere without the connector.</p>
             <h3>Claude Code</h3>
             <div class="codeblock">

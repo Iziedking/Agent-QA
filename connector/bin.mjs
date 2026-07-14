@@ -24,7 +24,10 @@ const DEFAULT_URL = "https://agentsqa.xyz/mcp";
 const SERVICE = "agent-memory";
 const CONFIG_DIR = join(homedir(), ".agent-memory");
 const CONFIG_FILE = join(CONFIG_DIR, "config.json");
-const VERSION = "0.1.0";
+// Fallback secret location for machines with no OS credential store (headless
+// servers). Written 0600 and used only with the user's explicit consent.
+const SECRET_FILE = join(CONFIG_DIR, "secret");
+const VERSION = "0.1.1";
 
 // --- config (non-secret: identity and endpoint only) ------------------------
 
@@ -39,6 +42,20 @@ function loadConfig() {
 function saveConfig(cfg) {
   mkdirSync(CONFIG_DIR, { recursive: true });
   writeFileSync(CONFIG_FILE, JSON.stringify(cfg, null, 2) + "\n", "utf8");
+}
+
+// Where the passphrase lives: the OS credential store when one exists, else
+// the consented fallback file. Returns { pass, source } or nulls.
+function getSecret(user) {
+  try {
+    const pass = new Entry(SERVICE, user).getPassword();
+    if (pass) return { pass, source: "keyring" };
+  } catch {}
+  try {
+    const pass = readFileSync(SECRET_FILE, "utf8").trim();
+    if (pass) return { pass, source: "file" };
+  } catch {}
+  return { pass: null, source: null };
 }
 
 // --- prompts -----------------------------------------------------------------
@@ -106,7 +123,26 @@ async function setup() {
   const again = await promptHidden("Passphrase again: ");
   if (pass !== again) { console.error("The passphrases do not match. Nothing was stored."); process.exit(1); }
 
-  new Entry(SERVICE, user).setPassword(pass);
+  let storedIn = "the OS credential store";
+  try {
+    new Entry(SERVICE, user).setPassword(pass);
+    // A keyring write supersedes any earlier fallback file.
+    if (existsSync(SECRET_FILE)) rmSync(SECRET_FILE);
+  } catch {
+    // No credential store: normal on a headless server (no Keychain, no
+    // Credential Manager, no Secret Service daemon). Offer the honest
+    // fallback rather than failing: a file only this account can read.
+    console.log("\nThis machine has no OS credential store (common on headless servers).");
+    const yn = (await promptVisible("Store the passphrase in ~/.agent-memory/secret, readable only by this account? [y/N]: ")).toLowerCase();
+    if (yn !== "y" && yn !== "yes") {
+      console.error("Nothing was stored. On this machine, configure your MCP client with the");
+      console.error("X-Memory-User and X-Memory-Passphrase headers directly instead.");
+      process.exit(1);
+    }
+    mkdirSync(CONFIG_DIR, { recursive: true });
+    writeFileSync(SECRET_FILE, pass + "\n", { encoding: "utf8", mode: 0o600 });
+    storedIn = "~/.agent-memory/secret (file permissions 600)";
+  }
   saveConfig({ user, url });
 
   // A quick reachability check so a typo in the endpoint surfaces now.
@@ -122,7 +158,7 @@ async function setup() {
   // Installed from npm (running out of a node_modules) means npx can find us
   // by name; a repo checkout needs the explicit node path.
   const viaNpm = self.includes("node_modules");
-  console.log("\nStored. Wire an agent to this device's memory with one line:\n");
+  console.log(`\nStored in ${storedIn}. Wire an agent to this device's memory with one line:\n`);
   if (viaNpm) {
     console.log("  claude mcp add agent-memory -- npx -y agent-memory-connect");
     console.log("\nOr in any MCP client config that launches local servers:\n");
@@ -139,16 +175,20 @@ async function setup() {
 function status() {
   const cfg = loadConfig();
   if (!cfg) { console.log("Not set up. Run: agent-memory setup"); return; }
-  let held = false;
-  try { held = Boolean(new Entry(SERVICE, cfg.user).getPassword()); } catch {}
+  const { source } = getSecret(cfg.user);
+  const where =
+    source === "keyring" ? "stored in the OS credential store"
+    : source === "file" ? "stored in ~/.agent-memory/secret (file permissions 600)"
+    : "MISSING - run setup again";
   console.log(`identity   ${cfg.user}`);
   console.log(`endpoint   ${cfg.url || DEFAULT_URL}`);
-  console.log(`passphrase ${held ? "stored in the OS credential store" : "MISSING - run setup again"}`);
+  console.log(`passphrase ${where}`);
 }
 
 function reset() {
   const cfg = loadConfig();
   if (cfg) { try { new Entry(SERVICE, cfg.user).deletePassword(); } catch {} }
+  if (existsSync(SECRET_FILE)) rmSync(SECRET_FILE);
   if (existsSync(CONFIG_FILE)) rmSync(CONFIG_FILE);
   console.log("Removed the stored identity and passphrase from this device.");
 }
@@ -161,10 +201,9 @@ async function serve() {
     console.error("agent-memory: not set up on this device. Run: agent-memory setup");
     process.exit(1);
   }
-  let pass = null;
-  try { pass = new Entry(SERVICE, cfg.user).getPassword(); } catch {}
+  const { pass } = getSecret(cfg.user);
   if (!pass) {
-    console.error("agent-memory: no passphrase in the credential store. Run: agent-memory setup");
+    console.error("agent-memory: no stored passphrase on this device. Run: agent-memory setup");
     process.exit(1);
   }
 

@@ -24,6 +24,8 @@ claude mcp add agent-memory -- npx -y agent-memory-connect
 
 The agent talks to a local proxy over stdio; the proxy reads the passphrase from the credential store at runtime and attaches the headers to every HTTPS call. Every agent on the device shares the same memory, none of them ever sees the passphrase, and nothing secret sits in a config file, an env var, or a shell history. `npx agent-memory-connect status` shows what is configured (never the value); `npx agent-memory-connect reset` removes it.
 
+On a headless server with no credential store (no Keychain, no Secret Service daemon), setup says so and offers a fallback with your explicit yes: a file at `~/.agent-memory/secret` readable only by your account. `status` always reports which store holds the passphrase.
+
 The sections below wire clients directly with headers instead, which works everywhere the connector has not been set up.
 
 ## Claude Code
