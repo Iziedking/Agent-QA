@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Agent QA · proof, not trust</title>
-<meta name="description" content="Point it at a public MCP endpoint. It runs a real protocol probe and returns a graded reliability report covering schema, malformed input handling, latency, and description quality." />
+<title>Agent QA · one memory, every agent</title>
+<meta name="description" content="A private, portable memory for agents. Encrypted under your passphrase, stored on Walrus, recalled by any agent on any device. Install it once as an MCP server and your agent stops forgetting you." />
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiIgcm9sZT0iaW1nIiBhcmlhLWxhYmVsPSJBZ2VudCBRQSI+CiAgPHJlY3QgeD0iMiIgeT0iMiIgd2lkdGg9IjI4IiBoZWlnaHQ9IjI4IiByeD0iNyIgZmlsbD0iIzBhMGIwYyIgc3Ryb2tlPSIjMmYzNjNhIiBzdHJva2Utd2lkdGg9IjIiLz4KICA8cGF0aCBkPSJNOSAyNCBDIDExLjUgMTcgMTQgMTEgMTcuNiA3LjQgQyAxOS42IDExIDIxLjIgMTcgMjIuOCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjYWViN2JkIiBzdHJva2Utd2lkdGg9IjIuNCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+CiAgPHBhdGggZD0iTTEyIDE4LjYgQyAxNS41IDE2LjkgMTkuNSAxNi45IDIzLjYgMTguMiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjYWViN2JkIiBzdHJva2Utd2lkdGg9IjIuNCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+Cjwvc3ZnPgo=" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -25,12 +25,7 @@
     --accent: #aeb7bd;       /* grey phosphor, replaces the reference green */
     --accent-dim: #767e84;
     --glow: rgba(174, 183, 189, 0.55);
-    /* grade bands, kept desaturated to sit inside the grey world */
-    --g-a: #d6dde1;
-    --g-b: #b9c2c7;
-    --g-c: #9aa3a8;
-    --g-d: #7f878c;
-    --g-f: #cf6f6f;          /* only failure gets a colour cue */
+    --bad: #cf6f6f;          /* only failure gets a colour cue */
     --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
     --sans: "Saira", system-ui, -apple-system, "Segoe UI", sans-serif;
     --digital: "Orbitron", var(--mono);
@@ -51,8 +46,7 @@
     overflow-x: hidden;
   }
 
-  /* soft phosphor depth: a faint glow lifted from the top, grounded at the base.
-     No grid, so the surface reads as a clean panel rather than graph paper. */
+  /* soft phosphor depth: a faint glow lifted from the top, grounded at the base. */
   body::before {
     content: ""; position: fixed; inset: 0; z-index: 0; pointer-events: none;
     background:
@@ -102,12 +96,12 @@
     font-family: var(--mono); font-size: 12px; letter-spacing: 0.04em;
     color: var(--dim); background: var(--inset); border: 1px solid var(--line);
     padding: 8px 13px; text-decoration: none; display: inline-flex; align-items: center; gap: 8px;
-    transition: color .15s, border-color .15s;
+    transition: color .15s, border-color .15s; cursor: pointer;
   }
   .pill:hover { color: var(--accent); border-color: var(--accent-dim); }
   .led { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
   .led.live { background: var(--accent); box-shadow: 0 0 8px var(--glow); animation: pulse 2.4s infinite; }
-  .led.fail { background: var(--g-f); box-shadow: 0 0 8px rgba(207,111,111,.6); }
+  .led.fail { background: var(--bad); box-shadow: 0 0 8px rgba(207,111,111,.6); }
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
 
   /* ------------------------------ Intro ------------------------------ */
@@ -127,35 +121,6 @@
     text-transform: uppercase; color: var(--accent); margin: 30px 0 14px; }
   .sec-desc { color: var(--dim); font-size: 15px; max-width: 64ch; margin-bottom: 22px; }
 
-  /* input + button row */
-  form { display: block; }
-  .field { display: flex; gap: 0; border: 1px solid var(--line); background: var(--ink-2);
-    transition: border-color .2s, box-shadow .2s; }
-  .field:focus-within { border-color: var(--accent-dim); box-shadow: 0 0 0 3px rgba(174,183,189,0.08); }
-  .field .chev { display: grid; place-items: center; padding: 0 4px 0 16px; color: var(--accent);
-    font-family: var(--mono); }
-  input[type="url"] {
-    flex: 1; background: transparent; border: none; outline: none; color: var(--text);
-    font-family: var(--mono); font-size: 14px; padding: 17px 12px; min-width: 0;
-  }
-  input[type="url"]::placeholder { color: var(--faint); }
-  button.run {
-    flex: 0 0 auto; font-family: var(--sans); font-weight: 600; font-size: 12.5px;
-    letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink);
-    background: var(--text); border: none; padding: 0 30px; cursor: pointer;
-    transition: background .18s, transform .1s;
-  }
-  button.run:hover { background: #fff; }
-  button.run:active { transform: translateY(1px); }
-  button.run:disabled { background: var(--dim); cursor: progress; }
-
-  .demo { margin-top: 14px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-    font-family: var(--mono); font-size: 12px; }
-  .demo .lbl { color: var(--accent); }
-  .chip { font-family: var(--mono); font-size: 12px; color: var(--dim); background: var(--inset);
-    border: 1px solid var(--line); padding: 6px 11px; cursor: pointer; transition: color .15s, border-color .15s; }
-  .chip:hover { color: var(--accent); border-color: var(--accent-dim); }
-
   /* corner ticks helper */
   .ticks { position: relative; }
   .ticks::before, .ticks::after {
@@ -165,114 +130,109 @@
   .ticks::before { top: -1px; left: -1px; border-width: 1px 0 0 1px; }
   .ticks::after { bottom: -1px; right: -1px; border-width: 0 1px 1px 0; }
 
-  /* --------------------------- Scan / boot --------------------------- */
-  .scan { display: none; margin-top: 24px; border: 1px solid var(--line); background: var(--panel); padding: 18px; }
+  /* --------------------------- Memory console ------------------------ */
+  .idgrid { display: grid; grid-template-columns: 1.2fr 1.2fr 0.8fr; gap: 8px; }
+  @media (max-width: 720px) { .idgrid { grid-template-columns: 1fr; } }
+  .idfield { display: flex; flex-direction: column; border: 1px solid var(--line); background: var(--ink-2);
+    transition: border-color .2s, box-shadow .2s; }
+  .idfield:focus-within { border-color: var(--accent-dim); box-shadow: 0 0 0 3px rgba(174,183,189,0.08); }
+  .idfield label { font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.22em;
+    text-transform: uppercase; color: var(--faint); padding: 9px 12px 0; }
+  .idfield input {
+    background: transparent; border: none; outline: none; color: var(--text);
+    font-family: var(--mono); font-size: 14px; padding: 6px 12px 11px; min-width: 0; width: 100%;
+  }
+  .idfield input::placeholder { color: var(--faint); }
+  .idnote { margin-top: 10px; font-family: var(--mono); font-size: 11.5px; color: var(--faint); line-height: 1.6; }
+  .idnote b { color: var(--dim); font-weight: 500; }
+
+  .panes { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 26px; }
+  @media (max-width: 860px) { .panes { grid-template-columns: 1fr; } }
+  .pane { border: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; }
+  .pane-hd { display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 15px; border-bottom: 1px solid var(--line-dim); }
+  .pane-hd .t { font-family: var(--mono); font-size: 11px; letter-spacing: 0.26em;
+    text-transform: uppercase; color: var(--accent); }
+  .pane-hd .h { font-family: var(--mono); font-size: 10px; color: var(--faint); letter-spacing: 0.08em; }
+  .pane-bd { padding: 14px 15px 15px; display: flex; flex-direction: column; gap: 10px; flex: 1; }
+  textarea, input.q {
+    background: var(--ink-2); border: 1px solid var(--line); outline: none; color: var(--text);
+    font-family: var(--mono); font-size: 13.5px; padding: 12px; width: 100%;
+    transition: border-color .2s, box-shadow .2s; resize: vertical;
+  }
+  textarea { min-height: 110px; line-height: 1.6; }
+  textarea:focus, input.q:focus { border-color: var(--accent-dim); box-shadow: 0 0 0 3px rgba(174,183,189,0.08); }
+  textarea::placeholder, input.q::placeholder { color: var(--faint); }
+  button.act {
+    align-self: flex-start; font-family: var(--sans); font-weight: 600; font-size: 12.5px;
+    letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink);
+    background: var(--text); border: none; padding: 12px 28px; cursor: pointer;
+    transition: background .18s, transform .1s;
+  }
+  button.act:hover { background: #fff; }
+  button.act:active { transform: translateY(1px); }
+  button.act:disabled { background: var(--dim); cursor: progress; }
+
+  .outlog { border-top: 1px solid var(--line-dim); margin-top: 4px; padding-top: 12px;
+    font-family: var(--mono); font-size: 12.5px; color: var(--dim); display: none; }
+  .outlog.on { display: block; }
+  .outlog .ok { color: var(--accent); }
+  .outlog .bad { color: var(--bad); }
+  .outlog .receipt { display: block; margin-top: 6px; color: var(--faint); font-size: 11px;
+    word-break: break-all; }
+  .outlog .receipt b { color: var(--dim); font-weight: 500; letter-spacing: 0.14em; font-size: 9.5px;
+    text-transform: uppercase; margin-right: 8px; }
+
+  .records { list-style: none; display: grid; gap: 9px; margin-top: 4px; }
+  .records li { display: grid; grid-template-columns: auto 1fr; gap: 12px; align-items: start;
+    font-family: var(--mono); font-size: 12.5px; color: var(--text); line-height: 1.6;
+    border: 1px solid var(--line-dim); background: var(--ink); padding: 10px 12px; }
+  .records li::before { content: "\25C6"; color: var(--accent); font-size: 10px; line-height: 1.9; }
+  .rec-note { font-family: var(--mono); font-size: 12px; color: var(--faint); margin-top: 8px; }
+  .rec-note.warn { color: var(--bad); }
+
+  /* progress strip while a write seals to Walrus */
+  .scan { display: none; margin-top: 14px; border: 1px solid var(--line); background: var(--panel); padding: 14px; }
   .scan.on { display: block; }
   .scan .hd { display: flex; justify-content: space-between; font-family: var(--mono);
-    font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--accent); margin-bottom: 12px; }
+    font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--accent); margin-bottom: 10px; }
   .scan .hd .blink::after { content: "_"; animation: blink 1s steps(1) infinite; }
   @keyframes blink { 50% { opacity: 0; } }
   pre.stream { font-family: var(--mono); font-size: 11.5px; line-height: 1.7; color: var(--accent-dim);
-    white-space: pre; overflow: hidden; height: 132px; margin: 0; opacity: .9; }
-  .scan .bar { height: 2px; background: var(--line); margin-top: 12px; position: relative; overflow: hidden; }
+    white-space: pre; overflow: hidden; height: 76px; margin: 0; opacity: .9; }
+  .scan .bar { height: 2px; background: var(--line); margin-top: 10px; position: relative; overflow: hidden; }
   .scan .bar::after { content: ""; position: absolute; inset: 0; width: 30%;
     background: linear-gradient(90deg, transparent, var(--accent), transparent);
     animation: sweep 1.05s linear infinite; }
   @keyframes sweep { from { transform: translateX(-100%);} to { transform: translateX(340%);} }
 
-  /* ----------------------------- Report ------------------------------ */
-  .report { display: none; margin-top: 26px; }
-  .report.on { display: block; }
-  .report-top { display: grid; grid-template-columns: 230px 1fr; gap: 0; border: 1px solid var(--line); }
-  @media (max-width: 720px) { .report-top { grid-template-columns: 1fr; } }
-
-  .seal { padding: 26px 20px; text-align: center; border-right: 1px solid var(--line);
-    background: var(--panel); display: flex; flex-direction: column; align-items: center; justify-content: center; }
-  @media (max-width: 720px) { .seal { border-right: none; border-bottom: 1px solid var(--line); } }
-  .seal .glabel { font-family: var(--mono); font-size: 10px; letter-spacing: 0.3em;
-    text-transform: uppercase; color: var(--faint); margin-bottom: 10px; }
-  .seal .letter { font-family: var(--digital); font-weight: 800; font-size: 84px; line-height: .9; color: currentColor;
-    text-shadow: 0 0 26px var(--glow); animation: stamp .45s cubic-bezier(.2,1.3,.4,1) both; }
-  .seal .num { font-family: var(--digital); font-weight: 600; font-size: 15px; color: var(--text);
-    margin-top: 12px; letter-spacing: 0.06em; }
-  .seal .num .of { color: var(--faint); }
-  .seal .reach { margin-top: 8px; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.16em;
-    text-transform: uppercase; }
-  .reach.ok { color: var(--accent); } .reach.no { color: var(--g-f); }
-  @keyframes stamp { from { transform: scale(1.35); opacity: 0; } to { transform: none; opacity: 1; } }
-
-  .gauges { padding: 22px 22px 12px; background: var(--panel); }
-  .gauges .sec-label { margin: 0 0 16px; }
-  .gauge { margin-bottom: 15px; }
-  .gauge:last-child { margin-bottom: 6px; }
-  .grow { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
-  .grow .gn { font-family: var(--mono); font-size: 12px; color: var(--text); letter-spacing: 0.04em; }
-  .grow .gv { font-family: var(--digital); font-size: 13px; font-weight: 600; color: currentColor; }
-  .track { height: 6px; background: var(--ink); border: 1px solid var(--line); }
-  .fill { height: 100%; width: 0; background: currentColor; box-shadow: 0 0 10px -1px currentColor;
-    transition: width .9s cubic-bezier(.2,.8,.2,1); }
-
-  .grade-a{color:var(--g-a)} .grade-b{color:var(--g-b)} .grade-c{color:var(--g-c)}
-  .grade-d{color:var(--g-d)} .grade-f{color:var(--g-f)}
-
-  .notes { margin-top: 20px; display: grid; gap: 8px; border-left: 2px solid var(--line);
-    padding: 2px 0 2px 16px; }
-  .notes .n { font-family: var(--mono); font-size: 12.5px; color: var(--dim); }
-  .notes .n b { color: var(--accent); font-weight: 500; text-transform: uppercase; font-size: 10px;
-    letter-spacing: 0.16em; margin-right: 10px; }
-
-  /* tools */
-  .tools { margin-top: 28px; }
-  .tool { border: 1px solid var(--line); background: var(--panel); margin-bottom: 8px; }
-  .tool-hd { display: flex; align-items: center; justify-content: space-between; gap: 12px;
-    padding: 12px 15px; border-bottom: 1px solid var(--line-dim); flex-wrap: wrap; }
-  .tool-nm { font-family: var(--mono); font-weight: 500; font-size: 14px; }
-  .tool-nm::before { content: "> "; color: var(--accent); }
-  .tool-sc { font-family: var(--digital); font-size: 12px; color: var(--dim); }
-  .checks { display: flex; flex-wrap: wrap; gap: 7px; padding: 13px 15px; }
-  .check { display: flex; align-items: center; gap: 9px; border: 1px solid var(--line); background: var(--ink);
-    padding: 8px 11px; font-family: var(--mono); font-size: 12px; color: var(--dim);
-    flex: 1 1 250px; min-width: 0; cursor: pointer; transition: border-color .15s; }
-  .check:hover, .check:focus-visible { border-color: var(--accent-dim); outline: none; }
-  .check .mk { flex: 0 0 auto; font-weight: 600; }
-  .check .tag { flex: 0 0 auto; font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--faint); }
-  .check .nt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  /* clicking a chip opens it to the full note: it wraps and takes the whole row */
-  .check.open { flex-basis: 100%; align-items: flex-start; }
-  .check.open .nt { overflow: visible; text-overflow: clip; white-space: normal; word-break: break-word; }
-  .check.pass { border-color: #333c3f; } .check.pass .mk { color: var(--accent); }
-  .check.fail { border-color: rgba(207,111,111,.45); background: rgba(207,111,111,.05); } .check.fail .mk { color: var(--g-f); }
-
-  /* per-tool pager, shown only when a server lists more tools than one page */
-  .pager { display: flex; align-items: center; justify-content: center; gap: 16px; margin-top: 14px; }
-  .pg-btn { font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
-    color: var(--dim); background: var(--ink); border: 1px solid var(--line); padding: 6px 13px; cursor: pointer;
-    transition: color .15s, border-color .15s; }
-  .pg-btn:hover:not(:disabled) { color: var(--accent); border-color: var(--accent-dim); }
-  .pg-btn:disabled { opacity: 0.3; cursor: default; }
-  .pg-info { font-family: var(--mono); font-size: 11px; color: var(--faint); letter-spacing: 0.04em; }
-
-  /* defect log */
-  .defects { margin-top: 28px; border: 1px solid var(--line); background: var(--panel); }
-  .defects .sec-label { padding: 15px 16px 0; margin: 0; }
-  .defects ol { list-style: none; padding: 12px 16px 16px; display: grid; gap: 9px; counter-reset: d; }
-  .defects li { counter-increment: d; display: grid; grid-template-columns: auto 1fr; gap: 12px;
-    font-family: var(--mono); font-size: 12.5px; color: var(--text); align-items: start; }
-  .defects li::before { content: "E" counter(d, decimal-leading-zero); font-family: var(--digital);
-    font-size: 10px; color: var(--g-f); border: 1px solid var(--g-f); padding: 2px 6px; line-height: 1.4; }
-  .defects .clean { padding: 15px 16px; font-family: var(--mono); font-size: 12.5px; color: var(--accent); }
-
-  /* reputation memory records: diamond marker, not the red defect counter */
-  .rep-lead { padding: 14px 16px 2px; font-family: var(--mono); font-size: 12px; color: var(--dim); line-height: 1.5; }
-  #repList { padding: 8px 16px 16px; }
-  #repList li::before { content: "\25C6"; border: none; padding: 0; color: var(--accent);
-    font-family: var(--mono); font-size: 10px; line-height: 1.7; }
-
   /* error */
-  .error { display: none; margin-top: 22px; border: 1px solid var(--g-f); background: rgba(207,111,111,.06);
-    padding: 16px; font-family: var(--mono); font-size: 12.5px; color: var(--g-f); }
+  .error { display: none; margin-top: 22px; border: 1px solid var(--bad); background: rgba(207,111,111,.06);
+    padding: 16px; font-family: var(--mono); font-size: 12.5px; color: var(--bad); }
   .error.on { display: block; }
   .error b { display: block; letter-spacing: 0.16em; text-transform: uppercase; font-size: 10px; margin-bottom: 6px; }
+
+  /* ------------------------- Wire your agent ------------------------- */
+  .codeblock { border: 1px solid var(--line); background: var(--ink-2); margin: 14px 0; }
+  .codeblock .cbhd { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px;
+    border-bottom: 1px solid var(--line-dim); font-family: var(--mono); font-size: 11px; color: var(--faint); }
+  .codeblock .copy { font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em; color: var(--dim);
+    background: var(--inset); border: 1px solid var(--line); padding: 4px 9px; cursor: pointer; }
+  .codeblock .copy:hover { color: var(--accent); border-color: var(--accent-dim); }
+  .codeblock pre { margin: 0; padding: 14px 16px; overflow-x: auto; font-family: var(--mono); font-size: 13px;
+    line-height: 1.7; color: var(--text); }
+  .codeblock .cm { color: var(--faint); }   /* comment */
+  .codeblock .fl { color: var(--accent); }   /* flag / keyword */
+
+  .ritual { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0; border: 1px solid var(--line); margin-top: 18px; }
+  @media (max-width: 720px) { .ritual { grid-template-columns: 1fr; } }
+  .ritual .step { padding: 16px; border-right: 1px solid var(--line); background: var(--panel); }
+  .ritual .step:last-child { border-right: none; }
+  @media (max-width: 720px) { .ritual .step { border-right: none; border-bottom: 1px solid var(--line); }
+    .ritual .step:last-child { border-bottom: none; } }
+  .ritual .n { font-family: var(--digital); font-size: 11px; color: var(--accent); margin-bottom: 8px; letter-spacing: 0.2em; }
+  .ritual .t { font-family: var(--sans); font-weight: 600; font-size: 15px; margin-bottom: 6px; }
+  .ritual p { font-size: 13px; color: var(--dim); line-height: 1.55; }
 
   /* console strip */
   .console { margin-top: 40px; border: 1px solid var(--line); background: var(--ink-2); padding: 22px;
@@ -293,7 +253,6 @@
     font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.14em; color: var(--faint); text-transform: uppercase; }
 
   .reveal { animation: rise .5s ease both; }
-  .reveal.d2 { animation-delay: .08s; } .reveal.d3 { animation-delay: .16s; } .reveal.d4 { animation-delay: .24s; }
   @keyframes rise { from { opacity: 0; transform: translateY(12px);} to { opacity: 1; transform: none; } }
 
   /* ------------------------------ Docs ------------------------------- */
@@ -351,16 +310,6 @@
     color: var(--accent); margin-bottom: 8px; }
   .cards .card .ttl { font-family: var(--serif); font-weight: 600; font-size: 16px; margin-bottom: 6px; }
   .cards .card p { font-size: 13px; margin: 0; }
-  .codeblock { border: 1px solid var(--line); background: var(--ink-2); margin: 14px 0; }
-  .codeblock .cbhd { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px;
-    border-bottom: 1px solid var(--line-dim); font-family: var(--mono); font-size: 11px; color: var(--faint); }
-  .codeblock .copy { font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em; color: var(--dim);
-    background: var(--inset); border: 1px solid var(--line); padding: 4px 9px; cursor: pointer; }
-  .codeblock .copy:hover { color: var(--accent); border-color: var(--accent-dim); }
-  .codeblock pre { margin: 0; padding: 14px 16px; overflow-x: auto; font-family: var(--mono); font-size: 13px;
-    line-height: 1.7; color: var(--text); }
-  .codeblock .cm { color: var(--faint); }   /* comment */
-  .codeblock .fl { color: var(--accent); }   /* flag / keyword */
   .faq-q { font-family: var(--sans); font-weight: 600; font-size: 16px; color: var(--text); margin: 22px 0 6px; }
   .faq-q:first-child { margin-top: 0; }
 
@@ -444,13 +393,13 @@
   .intro-controls button:hover { color: var(--accent); border-color: var(--accent-dim); }
 
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-  @media (prefers-reduced-motion: reduce) { *{ animation: none !important; transition: none !important; } .fill{transition:none} }
+  @media (prefers-reduced-motion: reduce) { *{ animation: none !important; transition: none !important; } }
 </style>
 </head>
 <body>
   <div class="boot" id="intro" role="dialog" aria-label="Agent QA boot sequence">
     <div class="crt">
-      <div class="crt-bar"><span>AGENT·QA · reliability bench</span><span id="introStatus">standby</span></div>
+      <div class="crt-bar"><span>AGENT·QA · memory core</span><span id="introStatus">standby</span></div>
       <div class="crt-body" id="introBody"></div>
       <div class="intro-controls">
         <button id="introMute" type="button">mute</button>
@@ -470,7 +419,7 @@
         </div>
         <div>
           <div class="wordmark">AGENT<span style="color:var(--accent)">·</span>QA</div>
-          <div class="sub">Reliability Bench</div>
+          <div class="sub">Portable Agent Memory</div>
         </div>
       </div>
       <div class="nav-right">
@@ -482,87 +431,111 @@
 
     <main>
       <section class="intro">
-        <div class="status-line" id="bootLine">System · standby</div>
+        <div class="status-line" id="bootLine">Memory · standby</div>
         <p>
-          An MCP server asks your agent to <b>trust it</b>. Agent QA checks it instead,
-          and remembers what it found. Grade any public endpoint on how it handles bad input,
-          how fast it answers, and whether its tools are clear enough for an AI to use,
-          then recall that verdict before you trust it.
-          <span class="mut">Proof, not trust.</span>
+          Your agent forgets you the moment a session ends. Agent QA gives it
+          <b>one memory that follows you</b>: encrypted under your passphrase,
+          kept on Walrus, recalled by any agent on any device. Wire it in once and
+          your coding agent, trading agent, or wallet agent picks up where the last
+          one left off. <span class="mut">Yours, not the vendor's.</span>
         </p>
       </section>
 
       <section>
-        <div class="sec-label">Evaluate an endpoint</div>
+        <div class="sec-label">Your identity</div>
         <div class="sec-desc">
-          Paste a public MCP endpoint URL. Agent QA opens a real protocol session and runs a
-          read-only probe, then remembers the verdict so any agent can recall it later. It sends
-          only input a correct server rejects before doing any work.
+          Who this memory belongs to. The passphrase encrypts every note before it
+          touches storage. It travels only over HTTPS with each call, is used
+          transiently, and is never stored anywhere. Whoever holds it holds the
+          memory; lose it and the notes stay sealed forever.
         </div>
-
-        <form id="form" autocomplete="off">
-          <div class="field ticks">
-            <span class="chev">›</span>
-            <input id="url" name="url" type="url" inputmode="url" required
-              placeholder="https://your-server.example/mcp" aria-label="MCP endpoint URL" />
-            <button class="run" id="run" type="submit">Evaluate</button>
+        <div class="idgrid">
+          <div class="idfield ticks">
+            <label for="idUser">Identity</label>
+            <input id="idUser" type="text" autocomplete="username" placeholder="you@example.com" />
           </div>
-        </form>
-        <div class="demo">
-          <span class="lbl">or try:</span>
-          <button type="button" class="chip" id="selfChip" data-url="">grade this service</button>
+          <div class="idfield ticks">
+            <label for="idPass">Passphrase</label>
+            <input id="idPass" type="password" autocomplete="current-password" placeholder="only you know this" />
+          </div>
+          <div class="idfield ticks">
+            <label for="idFolder">Folder</label>
+            <input id="idFolder" type="text" placeholder="project name (optional)" />
+          </div>
         </div>
+        <div class="idnote"><b>One folder per project.</b> The same identity and passphrase reach the same memory from every agent and every machine.</div>
+      </section>
 
-        <div class="scan ticks" id="scan" aria-live="polite">
-          <div class="hd"><span id="scanStep" class="blink">running probe</span><span id="scanPct">00%</span></div>
-          <pre class="stream" id="stream"></pre>
-          <div class="bar"></div>
+      <section>
+        <div class="sec-label">The console</div>
+        <div class="panes">
+          <div class="pane ticks">
+            <div class="pane-hd"><span class="t">Remember</span><span class="h">encrypt · seal · receipt</span></div>
+            <div class="pane-bd">
+              <textarea id="memText" placeholder="2026-07-14: chose Caddy over nginx because certificates renew themselves. Config lives in deploy/Caddyfile."></textarea>
+              <button class="act" id="memBtn" type="button">Remember</button>
+              <div class="scan" id="memScan" aria-live="polite">
+                <div class="hd"><span id="memStep" class="blink">encrypting</span><span>WALRUS</span></div>
+                <pre class="stream" id="memStream"></pre>
+                <div class="bar"></div>
+              </div>
+              <div class="outlog" id="memOut" aria-live="polite"></div>
+            </div>
+          </div>
+          <div class="pane ticks">
+            <div class="pane-hd"><span class="t">Recall</span><span class="h">pull · decrypt · rank</span></div>
+            <div class="pane-bd">
+              <input class="q" id="recQuery" type="text" placeholder="what did I decide about the proxy?" />
+              <button class="act" id="recBtn" type="button">Recall</button>
+              <ol class="records" id="recList"></ol>
+              <div class="rec-note" id="recNote" style="display:none"></div>
+            </div>
+          </div>
         </div>
-
         <div class="error" id="error" role="alert">
-          <b>Probe failed</b><span id="errorMsg"></span>
+          <b>Memory fault</b><span id="errorMsg"></span>
         </div>
+      </section>
 
-        <section class="report" id="report" aria-live="polite">
-          <div class="report-top reveal">
-            <div class="seal" id="seal">
-              <div class="glabel">Grade</div>
-              <div class="letter" id="gradeLetter">–</div>
-              <div class="num"><span id="scoreVal">0</span><span class="of"> / 100</span></div>
-              <div class="reach" id="reach"></div>
-            </div>
-            <div class="gauges">
-              <div class="sec-label">Category scores</div>
-              <div id="gaugeList"></div>
-            </div>
-          </div>
-
-          <div class="notes reveal d2" id="notes"></div>
-
-          <div class="tools reveal d3">
-            <div class="sec-label">Per-tool results · <span id="toolCount">0</span> listed</div>
-            <div id="toolList"></div>
-            <div id="toolPager" class="pager"></div>
-          </div>
-
-          <div class="defects reveal d4">
-            <div class="sec-label">Defect log</div>
-            <ol id="defectList"></ol>
-            <div class="clean" id="noDefects" style="display:none">No issues found · clean bill of health.</div>
-          </div>
-
-          <div class="defects reveal d4" id="repBox" style="display:none">
-            <div class="sec-label">Reputation memory · Walrus</div>
-            <div class="rep-lead" id="repLead"></div>
-            <ol id="repList"></ol>
-          </div>
-        </section>
+      <section>
+        <div class="sec-label">Wire your agent</div>
+        <div class="sec-desc">
+          The same memory through MCP. Paste one block into your agent's configuration
+          and it remembers you across machines. The identity and passphrase ride as
+          headers, so the secret never enters the model's context.
+        </div>
+        <div class="codeblock">
+          <div class="cbhd"><span>claude code · one command</span><button class="copy" type="button">COPY</button></div>
+          <pre>claude mcp add <span class="fl">--transport http</span> agent-memory https://agentsqa.xyz/mcp <span class="fl">\</span>
+  --header "X-Memory-User: you@example.com" <span class="fl">\</span>
+  --header "X-Memory-Passphrase: your-passphrase"</pre>
+        </div>
+        <div class="codeblock">
+          <div class="cbhd"><span>.mcp.json · any MCP client</span><button class="copy" type="button">COPY</button></div>
+          <pre>{
+  <span class="fl">"mcpServers"</span>: {
+    <span class="fl">"agent-memory"</span>: {
+      "type": "http",
+      "url": "https://agentsqa.xyz/mcp",
+      "headers": {
+        "X-Memory-User": "you@example.com",
+        "X-Memory-Passphrase": "${AGENT_MEMORY_PASSPHRASE}"
+      }
+    }
+  }
+}</pre>
+        </div>
+        <div class="ritual">
+          <div class="step"><div class="n">01</div><div class="t">Recall first</div><p>Every session opens by recalling the project folder, so the agent continues instead of starting from zero.</p></div>
+          <div class="step"><div class="n">02</div><div class="t">Remember in the moment</div><p>Decisions, preferences, and actions are stored when they happen, with a Walrus receipt for each write.</p></div>
+          <div class="step"><div class="n">03</div><div class="t">Close with a digest</div><p>Before the session ends, one handoff note: what changed, where things stand, what comes next.</p></div>
+        </div>
       </section>
 
       <div class="console ticks">
         <div class="prompt">&gt;_</div>
-        <div class="ttl">AGENT-QA CONSOLE</div>
-        <div class="ln">read-only MCP probe · verdicts remembered on Walrus · recall before you trust</div>
+        <div class="ttl">MEMORY CONSOLE</div>
+        <div class="ln">encrypted under your passphrase · confirmed on Walrus · recalled by any agent</div>
       </div>
     </main>
 
@@ -570,7 +543,7 @@
       <div class="foot-top">
         <div>
           <div class="wordmark">AGENT<span style="color:var(--accent)">·</span>QA</div>
-          <div class="sub">Proof, not trust</div>
+          <div class="sub">One memory · every agent</div>
         </div>
         <div class="foot-links">
           <a href="/docs">API</a>
@@ -590,16 +563,15 @@
       <div class="docs-hd">
         <div>
           <div class="wm">AGENT<span>·</span>QA DOCS</div>
-          <div class="sub">Proof, not trust</div>
+          <div class="sub">One memory · every agent</div>
         </div>
         <button class="docs-close" id="docsClose" aria-label="Close documentation">✕</button>
       </div>
       <div class="docs-body">
         <nav class="docs-nav" id="docsNav">
           <button data-sec="overview" class="active">Overview</button>
-          <button data-sec="bench">Using the bench</button>
-          <button data-sec="analysis">Reading the analysis</button>
-          <button data-sec="cli">Command line</button>
+          <button data-sec="wire">Wire your agent</button>
+          <button data-sec="console">Using the console</button>
           <button data-sec="api">HTTP API</button>
           <button data-sec="faq">FAQ</button>
           <a class="gh" href="https://modelcontextprotocol.io" target="_blank" rel="noopener">MCP spec ↗</a>
@@ -608,148 +580,156 @@
 
           <section data-sec="overview" class="on">
             <h2>What Agent QA is</h2>
-            <p class="lead">A reputation layer for MCP tools. Give it a URL, get a graded report on how the server behaves, and a remembered track record any agent can recall before trusting it.</p>
-            <p>An MCP server asks your agent to trust it. Agent QA checks it instead, and remembers what it found. It connects the way an agent would, runs five read-only checks, and returns a letter grade with the reasons behind it. Nothing it sends is meant to change state on the server, so it is safe to point at a server you do not own.</p>
+            <p class="lead">A private, portable memory for agents. Encrypted under your passphrase, kept on Walrus, recalled by any agent on any device. Install it once as an MCP server and your agent stops forgetting you.</p>
+            <p>Agents are stateless. A coding agent forgets the project between sessions; a trading agent forgets its own trades; a wallet agent forgets what it rescued. Whatever memory products exist keep your context inside one vendor, readable by them, unreachable from anywhere else. Agent QA moves the memory to you: your passphrase encrypts every note before it leaves the server's memory, the ciphertext lives on Walrus, and any agent you authorise can recall it from anywhere.</p>
             <div class="callout">
-              <p>"Every listing on OKX.AI has to be tested before it goes live. Agent QA turns that manual step into one call."</p>
+              <p>"Memory is quality assurance for agents. An agent that remembers its decisions, its trades, and its mistakes is a better agent every session."</p>
               <span class="cite">Built for the OKX.AI marketplace</span>
             </div>
-            <h3>The five checks</h3>
-            <p>Each check is scored on its own, then rolled into one grade.</p>
+            <h3>How a note travels</h3>
             <ol>
-              <li><b>Connection and handshake.</b> Can the server open a session and list its tools at all.</li>
-              <li><b>Schema validity.</b> Does every tool declare a valid input schema with its required fields. An agent reads that schema to build its calls.</li>
-              <li><b>Malformed input handling.</b> When the input is bad, does the server reject it cleanly instead of crashing or quietly returning a wrong answer.</li>
-              <li><b>Latency.</b> How fast the server answers over repeated calls, reported as p50 and p95.</li>
-              <li><b>Description quality.</b> Are the tool names and descriptions clear enough for an AI to pick the right tool and fill the right arguments.</li>
+              <li><b>Remember.</b> Your note reaches the memory service with your identity and passphrase. A key is derived from the passphrase, the note is encrypted, and the ciphertext is sealed to Walrus.</li>
+              <li><b>Confirm.</b> The reply says stored only after Walrus confirms the write, and carries the blob id as a receipt. A failed write says so; it never pretends.</li>
+              <li><b>Recall.</b> A query pulls the folder's ciphertext, decrypts it transiently with your passphrase, ranks it against the question, and returns the best matches. A wrong passphrase decrypts nothing.</li>
             </ol>
-            <h3>Reputation memory</h3>
-            <p>Every grade is remembered as a compact, tamper-evident fact on Walrus, in one shared registry. Before an agent uses an unfamiliar server, it can recall what Agent QA found last time and trust the tool with proof instead of a shrug. A tool graded once is vetted for everyone who asks after. The memory is optional: with no account configured, grading still works and the panel reports that memory is off.</p>
+            <h3>Folders</h3>
+            <p>Memory is organised as you, then folders, then notes. One folder per project or task keeps recall scoped and fast: your coding agent recalls <code>project-x</code>, your trading agent recalls <code>dex-trading</code>, and neither wades through the other's notes.</p>
           </section>
 
-          <section data-sec="bench">
-            <h2>Using the bench</h2>
-            <p>The bench is the box on the home screen. Three steps.</p>
+          <section data-sec="wire">
+            <h2>Wire your agent</h2>
+            <p class="lead">One endpoint, two headers. Any agent that speaks MCP over HTTP carries the memory.</p>
+            <p>The identity and passphrase ride as HTTP headers set in the client's configuration, never as tool arguments, so the secret never enters the model's context.</p>
+            <h3>Claude Code</h3>
+            <div class="codeblock">
+              <div class="cbhd"><span>one command</span><button class="copy" type="button">COPY</button></div>
+              <pre>claude mcp add <span class="fl">--transport http</span> agent-memory https://agentsqa.xyz/mcp <span class="fl">\</span>
+  --header "X-Memory-User: you@example.com" <span class="fl">\</span>
+  --header "X-Memory-Passphrase: your-passphrase"</pre>
+            </div>
+            <p>Or per project in a <code>.mcp.json</code> at the repo root, with the passphrase drawn from the environment so the file stays shareable.</p>
+            <div class="codeblock">
+              <div class="cbhd"><span>.mcp.json</span><button class="copy" type="button">COPY</button></div>
+              <pre>{
+  <span class="fl">"mcpServers"</span>: {
+    <span class="fl">"agent-memory"</span>: {
+      "type": "http",
+      "url": "https://agentsqa.xyz/mcp",
+      "headers": {
+        "X-Memory-User": "you@example.com",
+        "X-Memory-Passphrase": "${AGENT_MEMORY_PASSPHRASE}"
+      }
+    }
+  }
+}</pre>
+            </div>
+            <h3>Guaranteed recall on session start</h3>
+            <p>Claude Code reads the memory server's instructions on connect, so it knows the ritual. To guarantee the session starts from memory, add a <code>SessionStart</code> hook in <code>.claude/settings.json</code>; its output lands in the model's context at the start of every session.</p>
+            <div class="codeblock">
+              <div class="cbhd"><span>.claude/settings.json</span><button class="copy" type="button">COPY</button></div>
+              <pre>{
+  <span class="fl">"hooks"</span>: {
+    "SessionStart": [
+      { "hooks": [ {
+        "type": "command",
+        "command": "echo Recall this project's folder from agent-memory before doing anything else."
+      } ] }
+    ]
+  }
+}</pre>
+            </div>
+            <h3>Cursor</h3>
+            <div class="codeblock">
+              <div class="cbhd"><span>~/.cursor/mcp.json</span><button class="copy" type="button">COPY</button></div>
+              <pre>{
+  <span class="fl">"mcpServers"</span>: {
+    <span class="fl">"agent-memory"</span>: {
+      "url": "https://agentsqa.xyz/mcp",
+      "headers": {
+        "X-Memory-User": "you@example.com",
+        "X-Memory-Passphrase": "your-passphrase"
+      }
+    }
+  }
+}</pre>
+            </div>
+            <h3>Any other client</h3>
+            <p>Point it at <code>https://agentsqa.xyz/mcp</code> over streamable HTTP and attach the two headers to every request. That is the whole integration. Custom agents built on an MCP SDK pass the headers when constructing the HTTP transport.</p>
+            <h3>The session ritual</h3>
+            <p>The server tells every connected agent to work this way; it is what makes the memory reliable rather than occasional.</p>
             <ol>
-              <li>Paste the MCP endpoint URL into the field.</li>
-              <li>Press <b>Evaluate</b> and watch the probe run.</li>
-              <li>Read the report when it lands.</li>
+              <li><b>Start by recalling.</b> First thing in a session, recall with the project as the folder, so the agent continues where any previous session left off.</li>
+              <li><b>Remember at the moment it matters.</b> A decision, a preference, a trade placed, a wallet recovered: stored right then, not at the end.</li>
+              <li><b>Close with a handoff digest.</b> One note before the session ends: what changed, the state things were left in, what comes next.</li>
             </ol>
-            <h3>Reading the report</h3>
+          </section>
+
+          <section data-sec="console">
+            <h2>Using the console</h2>
+            <p>The console on the home screen is the human door to the same memory your agents use. Three fields, two actions.</p>
             <div class="cards">
-              <div class="card"><div class="lbl">Grade</div><div class="ttl">The seal</div><p>One letter from A to F, with the overall score out of 100 counting up beside it.</p></div>
-              <div class="card"><div class="lbl">Scores</div><div class="ttl">Category bars</div><p>A bar per check. A red bar is the one place a failure shows in colour.</p></div>
-              <div class="card"><div class="lbl">Tools</div><div class="ttl">Per-tool rows</div><p>Each tool the server lists, with a pass or fail chip for each check.</p></div>
-              <div class="card"><div class="lbl">Issues</div><div class="ttl">Defect log</div><p>The top problems found, worst first, written in plain language.</p></div>
+              <div class="card"><div class="lbl">Identity</div><div class="ttl">Who you are</div><p>A stable string that names you, such as an email address. The same identity reaches the same memory everywhere.</p></div>
+              <div class="card"><div class="lbl">Passphrase</div><div class="ttl">The only key</div><p>Encrypts every note before storage. Sent only over HTTPS, used transiently, never stored. Lose it and the memory stays sealed.</p></div>
+              <div class="card"><div class="lbl">Folder</div><div class="ttl">One per project</div><p>Scopes what you write and what comes back. Leave it empty for the default space.</p></div>
+              <div class="card"><div class="lbl">Receipt</div><div class="ttl">Proof of the write</div><p>Remember reports stored only after Walrus confirms, and shows the blob id the note lives under.</p></div>
             </div>
-            <p>An endpoint that cannot be reached comes back as an <code>F</code>, because a server you cannot reach is a server you cannot trust.</p>
-          </section>
-
-          <section data-sec="analysis">
-            <h2>Reading the analysis</h2>
-            <p class="lead">Every term the report shows, in plain language, so you can read a grade without guessing.</p>
-
-            <h3>The grade</h3>
-            <p>One letter from A to F, with an overall score out of 100. The score is a weighted average of only the categories that actually ran, so a server with no tools is judged on what could be measured.</p>
+            <h3>Writing notes that recall well</h3>
             <ul>
-              <li><b>A</b>, 90 and above. Reliable.</li>
-              <li><b>B</b>, 80 to 89. Minor issues.</li>
-              <li><b>C</b>, 70 to 79. Works, with real gaps.</li>
-              <li><b>D</b>, 60 to 69. Unreliable in places.</li>
-              <li><b>F</b>, below 60, or could not be reached. Do not depend on it yet.</li>
+              <li>Start with the date. "2026-07-14: chose Caddy over nginx because certificates renew themselves."</li>
+              <li>Name concrete things: file paths, commands, amounts, addresses, endpoints.</li>
+              <li>State why, not just what. The reasoning is what the next session actually needs.</li>
             </ul>
-
-            <h3>Connection and handshake</h3>
-            <p><b>Reachable</b> means Agent QA opened a real session and the server listed its tools. <b>streamable-http</b> and <b>sse</b> are the two MCP transports; the report says which one connected. If neither connects, the grade is an F.</p>
-
-            <h3>Schema validity</h3>
-            <p>Each tool should declare a valid input schema with its types and required fields. An agent reads that schema to build its call, so a missing or broken schema breaks the caller before it even runs.</p>
-
-            <h3>Malformed input handling</h3>
-            <p>Agent QA sends input that a correct server should reject, then reads how the server responds. Three outcomes:</p>
-            <ul>
-              <li><b>Rejected cleanly.</b> The server returned a proper error. This is what you want.</li>
-              <li><b>Crashed.</b> The server threw an unhandled error or dropped the connection. Unreliable.</li>
-              <li><b>Silently accepted invalid input.</b> The server ran as if the bad input were fine. This is the dangerous one, because the agent gets a confident wrong answer.</li>
-            </ul>
-            <p>So "Rejected all 1 malformed inputs cleanly" means every probe for that tool got a clean rejection.</p>
-
-            <h3>Latency</h3>
-            <p>Agent QA times repeated round-trips to the server, after a couple of untimed warm-up calls so a cold start does not skew the result.</p>
-            <ul>
-              <li><b>p50.</b> The median. Half the calls were faster than this, so it is the typical speed.</li>
-              <li><b>p95.</b> The slow tail. Ninety-five percent of calls were faster, so this captures the worst realistic case, the one that stalls an agent.</li>
-              <li><b>over N calls.</b> How many timed round-trips the numbers are based on.</li>
-              <li><b>The band</b> (measured on p95): excellent up to 300 ms, good up to 800 ms, acceptable up to 2 seconds, slow up to 5 seconds, very slow beyond that.</li>
-              <li><b>High variance (p95 &gt;&gt; p50).</b> The tail is far slower than the median, so responses are unpredictable. Even a fast server loses a few points here, because an agent cannot plan around a server that is usually quick but sometimes very slow.</li>
-            </ul>
-
-            <h3>Description quality</h3>
-            <p>Scores whether an AI could pick this tool and call it correctly from its name and description alone. The number out of 100 comes from four parts: it has a description at all, the description has enough words to be meaningful, its parameters are documented, and its name is descriptive rather than generic.</p>
-            <p><b>0/1 parameters documented</b> means the tool declares one parameter and none of them are explained, neither in the parameter's own description nor named in the tool description. An agent has to guess what to pass.</p>
-
-            <h3>Per-tool rows</h3>
-            <p>Each tool the server lists gets its own row and score, with a chip for schema, description, and malformed input. Click any chip to open it and read the full note. Long tool lists are paged, six at a time.</p>
-
-            <h3>Reputation memory</h3>
-            <p>Below the report sits the endpoint's remembered track record.</p>
-            <ul>
-              <li><b>Remembered.</b> Each verdict is stored on Walrus, sealed so it cannot be quietly changed.</li>
-              <li><b>Shared registry.</b> One memory that every agent reads and writes, so a server graded once carries that record for the next.</li>
-              <li><b>Recall.</b> An agent can ask for a server's history before it trusts it, instead of grading from scratch every time.</li>
-            </ul>
-          </section>
-
-          <section data-sec="cli">
-            <h2>Command line</h2>
-            <p>The same engine runs from your terminal with the <code>agent-qa</code> command. Pass it the endpoint URL.</p>
-            <div class="codeblock">
-              <div class="cbhd"><span>evaluate</span><button class="copy" type="button">COPY</button></div>
-              <pre>agent-qa https://your-server.example/mcp</pre>
-            </div>
-            <p>For output a script can parse, add the JSON flag.</p>
-            <div class="codeblock">
-              <div class="cbhd"><span>json output</span><button class="copy" type="button">COPY</button></div>
-              <pre>agent-qa https://your-server.example/mcp <span class="fl">--json</span></pre>
-            </div>
-            <p>The command exits with code <code>1</code> when the endpoint cannot be reached, so it drops straight into a continuous integration check and fails the build on a bad server.</p>
-            <div class="codeblock">
-              <div class="cbhd"><span>ci check</span><button class="copy" type="button">COPY</button></div>
-              <pre><span class="cm"># fails the pipeline if the server is unreachable</span>
-agent-qa https://your-server.example/mcp <span class="fl">--json</span> &gt; report.json</pre>
-            </div>
+            <p>If a recall says the folder holds more than could be scanned, treat the answer as possibly incomplete and narrow the query or the folder.</p>
           </section>
 
           <section data-sec="api">
             <h2>HTTP API</h2>
-            <p>The service is a thin wrapper over the engine. One endpoint does the work.</p>
+            <p>The service is small on purpose. Two routes do the work; the MCP endpoint wraps the same two.</p>
             <div class="codeblock">
-              <div class="cbhd"><span>POST /evaluate</span><button class="copy" type="button">COPY</button></div>
+              <div class="cbhd"><span>POST /remember</span><button class="copy" type="button">COPY</button></div>
               <pre><span class="cm"># request body</span>
-{ <span class="fl">"endpoint_url"</span>: "https://your-server.example/mcp" }</pre>
+{
+  <span class="fl">"user_key"</span>: "you@example.com",
+  <span class="fl">"passphrase"</span>: "your-passphrase",
+  <span class="fl">"content"</span>: "2026-07-14: bought 0.5 ETH at 3,842 USDC. Stop at 3,690.",
+  <span class="fl">"folder"</span>: "dex-trading"
+}</pre>
             </div>
-            <p>It returns the full report as JSON: the overall grade and score, a score per category, a per-tool breakdown, and the top issues. A bad request body comes back as <code>422</code>. An unreachable target still returns <code>200</code>, with <code>reachable</code> set to false and the grade set to <code>F</code>, because the evaluation itself succeeded.</p>
+            <p>The reply reports <code>stored</code>, and when the write is confirmed it carries <code>receipt</code>, the Walrus blob id. A write that could not be confirmed comes back as <code>stored: false</code> with the reason in <code>note</code>.</p>
+            <div class="codeblock">
+              <div class="cbhd"><span>POST /recall</span><button class="copy" type="button">COPY</button></div>
+              <pre><span class="cm"># request body</span>
+{
+  <span class="fl">"user_key"</span>: "you@example.com",
+  <span class="fl">"passphrase"</span>: "your-passphrase",
+  <span class="fl">"query"</span>: "past trades on ETH and how they went",
+  <span class="fl">"folder"</span>: "dex-trading",
+  <span class="fl">"limit"</span>: 8
+}</pre>
+            </div>
+            <p>The reply carries <code>records</code>, the decrypted best matches, and <code>truncated</code>, which is true when the folder holds more than could be scanned.</p>
             <h3>Other routes</h3>
             <ul>
-              <li><code>GET /reputation?q=...</code> returns a server's remembered track record, without grading it again. The query is the endpoint URL or a question about it.</li>
               <li><code>GET /health</code> returns a liveness check for hosting and monitoring.</li>
-              <li><code>GET /</code> serves this browser interface.</li>
+              <li><code>GET /</code> serves this console.</li>
+              <li><code>/mcp</code> is the MCP endpoint: tools <code>remember</code> and <code>recall</code>, identity from the <code>X-Memory-User</code> and <code>X-Memory-Passphrase</code> headers.</li>
             </ul>
-            <p>As an MCP server it exposes two tools: <code>evaluate_mcp_endpoint</code> grades a server now, and <code>recall_tool_reputation</code> returns what Agent QA remembers about it, so an agent can check a tool before it trusts it.</p>
           </section>
 
           <section data-sec="faq">
             <h2>FAQ</h2>
-            <div class="faq-q">Is it safe to point at a server I do not own?</div>
-            <p>It is built to be. Every check is read-only. The malformed input probe sends only input that a correct server rejects before it does any work, and no payload carries a full set of valid-looking values. Tools that take no arguments, and tools the server marks destructive, are skipped rather than probed.</p>
-            <div class="faq-q">What does an F mean?</div>
-            <p>A score below 60, or an endpoint that could not be reached. Treat it as not ready to depend on yet.</p>
-            <div class="faq-q">Where is the reputation kept, and can it be edited?</div>
-            <p>Each verdict is stored on Walrus through MemWal and sealed, so it is portable across machines and cannot be quietly rewritten. It lives in one shared registry, so a server graded once carries that record for the next agent. The memory is optional: with no account set, Agent QA still grades every endpoint and simply reports that memory is off.</p>
-            <div class="faq-q">Why grade descriptions at all?</div>
-            <p>An AI picks a tool and fills its arguments from the name and description. When those are vague, the agent calls the wrong tool or passes the wrong values, even when the server code is perfectly fine.</p>
-            <div class="faq-q">Which transports does it speak?</div>
-            <p>It tries Streamable HTTP first, then falls back to HTTP with SSE, using the official MCP SDK so it speaks the real protocol.</p>
+            <div class="faq-q">Who can read my memory?</div>
+            <p>Whoever holds your identity string and your passphrase, and no one else. Every note is encrypted under a key derived from your passphrase before it reaches Walrus. The operator of this service cannot read your notes; neither can anyone who finds the ciphertext. A wrong passphrase decrypts nothing and returns nothing.</p>
+            <div class="faq-q">What if I lose the passphrase?</div>
+            <p>The memory stays sealed, permanently. There is no reset and no recovery, because a reset path for you would be a reading path for someone else. That is the price of the operator not being able to read your notes; treat the passphrase accordingly.</p>
+            <div class="faq-q">Where does the memory live?</div>
+            <p>On Walrus, as encrypted blobs, written through MemWal. Each confirmed write returns the blob id as a receipt, so a note is not just stored but provable. The service in front is stateless; you can point your agents at this one or run your own with the published compose files, and the memory model does not change.</p>
+            <div class="faq-q">What counts as one memory?</div>
+            <p>One identity. Folders divide it by project or task, so recall stays scoped: a coding agent reads the project folder, a trading agent reads the strategy folder, and the same person owns both from any device.</p>
+            <div class="faq-q">Why would my agent actually use it?</div>
+            <p>The MCP server carries instructions every connected agent reads: recall the folder at session start, remember decisions the moment they happen, close with a handoff digest. Clients with hooks can make the first recall automatic. The tools' own descriptions teach the note style that recalls well.</p>
+            <div class="faq-q">Is this the same Agent QA that graded MCP servers?</div>
+            <p>Same name, sharper product. The grading engine still exists in the codebase, but the product is the memory: quality assurance for agents now means an agent that remembers, on every machine, in every session.</p>
           </section>
 
         </div>
@@ -761,25 +741,19 @@ agent-qa https://your-server.example/mcp <span class="fl">--json</span> &gt; rep
 (function () {
   "use strict";
 
-  var CAT_ORDER = ["connection", "schema", "fuzz", "latency", "description"];
-  var CAT_LABELS = {
-    connection: "Connection & handshake", schema: "Schema validity",
-    fuzz: "Malformed-input handling", latency: "Latency", description: "Description quality"
-  };
-  var SCAN_STEPS = ["opening session", "listing tools", "validating schemas",
-                    "fuzzing inputs", "timing latency", "scoring descriptions"];
   var HEX = "0123456789abcdef";
   var reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   var $ = function (id) { return document.getElementById(id); };
-  var form = $("form"), urlInput = $("url"), runBtn = $("run");
-  var scan = $("scan"), stream = $("stream"), scanStep = $("scanStep"), scanPct = $("scanPct");
-  var report = $("report"), errorBox = $("error"), errorMsg = $("errorMsg");
+  var idUser = $("idUser"), idPass = $("idPass"), idFolder = $("idFolder");
+  var memText = $("memText"), memBtn = $("memBtn"), memScan = $("memScan"),
+      memStep = $("memStep"), memStream = $("memStream"), memOut = $("memOut");
+  var recQuery = $("recQuery"), recBtn = $("recBtn"), recList = $("recList"), recNote = $("recNote");
+  var errorBox = $("error"), errorMsg = $("errorMsg");
 
-  function band(s) { return s >= 90 ? "a" : s >= 80 ? "b" : s >= 70 ? "c" : s >= 60 ? "d" : "f"; }
   function el(t, c, txt) { var e = document.createElement(t); if (c) e.className = c; if (txt != null) e.textContent = txt; return e; }
 
-  /* ---- audio: mirrors avow's beep.ts readout and its telemetry blip ---- */
+  /* ---- audio: the beep readout and telemetry blip ---- */
   var audioOn = false, ac = null;
   var soundBtn = $("soundToggle");
   function applyAudio(on) {
@@ -791,8 +765,7 @@ agent-qa https://your-server.example/mcp <span class="fl">--json</span> &gt; rep
   }
   soundBtn.addEventListener("click", function () { applyAudio(!audioOn); });
 
-  // One short square-wave blip, the step-readout tone. Pitch rises per step so it
-  // reads like a line being spoken. (avow beep.ts: square, 8ms attack, 110ms decay.)
+  // One short square-wave blip, the step-readout tone.
   function beep(freq) {
     if (!audioOn || !ac) return;
     try {
@@ -807,7 +780,7 @@ agent-qa https://your-server.example/mcp <span class="fl">--json</span> &gt; rep
     } catch (e) {}
   }
 
-  // A short low telemetry blip (sine), randomized so it reads like data, for the scan.
+  // A short low telemetry blip (sine), randomized so it reads like data.
   function dataBlip() {
     if (!audioOn || !ac) return;
     try {
@@ -822,7 +795,7 @@ agent-qa https://your-server.example/mcp <span class="fl">--json</span> &gt; rep
     } catch (e) {}
   }
 
-  // A clean ascending two-note confirmation tone (avow confirmTone), on the grade.
+  // A clean ascending two-note confirmation tone, on a confirmed write.
   function confirmTone() {
     if (!audioOn || !ac) return;
     try {
@@ -839,63 +812,194 @@ agent-qa https://your-server.example/mcp <span class="fl">--json</span> &gt; rep
     } catch (e) {}
   }
 
-  // Read out the report: one rising beep per category as the bars fill, then a
-  // confirm tone as the grade lands. Spaced so each blip is a distinct step.
-  var readoutTimers = [];
-  function readout(steps) {
-    readoutTimers.forEach(clearTimeout); readoutTimers = [];
-    if (!audioOn) return;
-    for (var i = 0; i < steps; i++) {
-      (function (n) {
-        readoutTimers.push(setTimeout(function () { beep(740 + n * 90); }, n * 150));
-      })(i);
-    }
-    readoutTimers.push(setTimeout(confirmTone, steps * 150 + 130));
-  }
-
-  /* ---- digit counter: visual only, counts up like a computerized readout ---- */
-  function countTo(node, target, dur) {
-    target = Math.round(target || 0);
-    if (reduceMotion) { node.textContent = target; return; }
-    var start = performance.now(), from = 0, last = -1;
-    function step(now) {
-      var p = Math.min(1, (now - start) / dur);
-      var e = 1 - Math.pow(1 - p, 3);           // ease-out cubic
-      var v = Math.round(from + (target - from) * e);
-      if (v !== last) { node.textContent = v; last = v; }
-      if (p < 1) requestAnimationFrame(step);
-    }
-    requestAnimationFrame(step);
-  }
-
   /* ---- health LED ---- */
   fetch("/health").then(function (r) { return r.json(); }).then(function (d) {
     $("led").classList.add("live");
     $("statusText").textContent = "live v" + (d.version || "?");
   }).catch(function () { $("statusText").textContent = "offline"; });
 
-  // The demo chip grades this very service, so it works on the live site out of
-  // the box. On a private origin the SSRF guard will refuse it, which is correct.
-  var selfChip = $("selfChip");
-  if (selfChip) selfChip.dataset.url = location.origin + "/mcp";
+  function setStatus(txt, fail) {
+    $("bootLine").textContent = "Memory · " + txt;
+    var led = $("led");
+    led.classList.remove("fail");
+    if (fail) { led.classList.remove("live"); led.classList.add("fail"); }
+  }
 
-  document.querySelectorAll(".chip").forEach(function (c) {
-    c.addEventListener("click", function () { urlInput.value = c.getAttribute("data-url"); urlInput.focus(); });
+  /* ---- identity persistence: identity and folder only, never the passphrase ---- */
+  try {
+    idUser.value = localStorage.getItem("aqa_user") || "";
+    idFolder.value = localStorage.getItem("aqa_folder") || "";
+  } catch (e) {}
+  function saveIdentity() {
+    try {
+      localStorage.setItem("aqa_user", idUser.value.trim());
+      localStorage.setItem("aqa_folder", idFolder.value.trim());
+    } catch (e) {}
+  }
+  idUser.addEventListener("change", saveIdentity);
+  idFolder.addEventListener("change", saveIdentity);
+
+  function identity() {
+    var u = idUser.value.trim(), p = idPass.value;
+    if (!u || !p) {
+      fail("Enter your identity and passphrase first. The passphrase is the only key to this memory.");
+      (u ? idPass : idUser).focus();
+      return null;
+    }
+    return { user: u, pass: p, folder: idFolder.value.trim() };
+  }
+
+  function fail(msg) {
+    setStatus("fault", true);
+    errorMsg.textContent = " " + msg; errorBox.classList.add("on");
+    errorBox.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+  function clearFail() { errorBox.classList.remove("on"); }
+
+  function postJson(path, body, timeoutMs) {
+    var controller = new AbortController();
+    var deadline = setTimeout(function () { controller.abort(); }, timeoutMs);
+    return fetch(path, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body), signal: controller.signal
+    }).then(function (res) {
+      // Read as text first: an error from a proxy may be HTML, not JSON.
+      return res.text().then(function (text) {
+        var parsed = null;
+        try { parsed = text ? JSON.parse(text) : null; } catch (_) { parsed = null; }
+        return { ok: res.ok, status: res.status, body: parsed };
+      });
+    }).finally(function () { clearTimeout(deadline); });
+  }
+
+  /* ---- remember: encrypt, seal, receipt ---- */
+  var MEM_STEPS = ["encrypting under your passphrase", "sealing to walrus", "awaiting confirmation"];
+  var memTimers = [];
+  function randHexLine() {
+    var s = ""; for (var i = 0; i < 58; i++) s += HEX[(Math.random() * 16) | 0];
+    return s.replace(/(.{2})/g, "$1 ").trim();
+  }
+  function startMemScan() {
+    memOut.classList.remove("on");
+    memScan.classList.add("on");
+    var i = 0; memStep.textContent = MEM_STEPS[0];
+    memTimers.push(setInterval(function () { i = (i + 1) % MEM_STEPS.length; memStep.textContent = MEM_STEPS[i]; }, 1400));
+    if (!reduceMotion) {
+      var lines = [], blipN = 0;
+      memTimers.push(setInterval(function () {
+        lines.push(randHexLine()); if (lines.length > 4) lines.shift();
+        memStream.textContent = lines.join("\n");
+        if ((blipN++ % 4) === 0) dataBlip();
+      }, 110));
+    }
+  }
+  function stopMemScan() {
+    memScan.classList.remove("on");
+    memTimers.forEach(function (t) { clearInterval(t); }); memTimers = [];
+  }
+
+  var memBusy = false;
+  memBtn.addEventListener("click", function () {
+    if (memBusy) return;
+    clearFail();
+    var id = identity(); if (!id) return;
+    var content = memText.value.trim();
+    if (!content) { memText.focus(); return; }
+    if (audioOn && ac && ac.state === "suspended") ac.resume();
+    memBusy = true; memBtn.disabled = true; memBtn.textContent = "Sealing…";
+    setStatus("writing", false);
+    startMemScan();
+    postJson("/remember", { user_key: id.user, passphrase: id.pass, content: content, folder: id.folder }, 90000)
+      .then(function (r) {
+        stopMemScan();
+        memOut.innerHTML = "";
+        if (r.ok && r.body && r.body.stored) {
+          confirmTone();
+          setStatus("stored", false);
+          memOut.appendChild(el("span", "ok", "✓ Confirmed on Walrus."));
+          if (r.body.receipt) {
+            var rc = el("span", "receipt");
+            rc.appendChild(el("b", null, "receipt"));
+            rc.appendChild(document.createTextNode(r.body.receipt));
+            memOut.appendChild(rc);
+          }
+          memText.value = "";
+        } else {
+          setStatus("fault", true);
+          var reason = (r.body && (r.body.note || (r.body.detail && JSON.stringify(r.body.detail)))) ||
+                       ("The service returned an error (HTTP " + r.status + ").");
+          memOut.appendChild(el("span", "bad", "✕ Not stored. " + reason));
+        }
+        memOut.classList.add("on");
+      })
+      .catch(function (err) {
+        stopMemScan();
+        if (err.name === "AbortError") fail("The write timed out before Walrus confirmed it. Try again.");
+        else fail("Could not reach the memory service. " + err.message);
+      })
+      .then(function () { memBusy = false; memBtn.disabled = false; memBtn.textContent = "Remember"; });
   });
+
+  /* ---- recall: pull, decrypt, rank ---- */
+  var recBusy = false;
+  function doRecall() {
+    if (recBusy) return;
+    clearFail();
+    var id = identity(); if (!id) return;
+    var q = recQuery.value.trim();
+    if (!q) { recQuery.focus(); return; }
+    recBusy = true; recBtn.disabled = true; recBtn.textContent = "Decrypting…";
+    setStatus("recalling", false);
+    recList.innerHTML = ""; recNote.style.display = "none";
+    postJson("/recall", { user_key: id.user, passphrase: id.pass, query: q, folder: id.folder, limit: 8 }, 45000)
+      .then(function (r) {
+        if (!r.ok || !r.body) {
+          setStatus("fault", true);
+          return fail("The service returned an error (HTTP " + r.status + ").");
+        }
+        var recs = r.body.records || [];
+        setStatus(recs.length ? "recalled " + recs.length : "nothing yet", false);
+        recs.forEach(function (m, i) {
+          var li = el("li", null, m);
+          li.style.animation = reduceMotion ? "" : "rise .4s ease both";
+          li.style.animationDelay = (i * 0.06) + "s";
+          recList.appendChild(li);
+          beep(700 + i * 60);
+        });
+        if (!recs.length) {
+          recNote.className = "rec-note";
+          recNote.textContent = r.body.memory_enabled === false
+            ? "Memory is not configured on the server yet."
+            : "Nothing came back. Either nothing relevant is remembered in this folder, or the passphrase is not the one the notes were written under.";
+          recNote.style.display = "block";
+        } else if (r.body.truncated) {
+          recNote.className = "rec-note warn";
+          recNote.textContent = "This folder holds more than could be scanned, so the answer may be incomplete. Narrow the query or the folder.";
+          recNote.style.display = "block";
+        }
+      })
+      .catch(function (err) {
+        if (err.name === "AbortError") fail("The recall timed out. Try again.");
+        else fail("Could not reach the memory service. " + err.message);
+      })
+      .then(function () { recBusy = false; recBtn.disabled = false; recBtn.textContent = "Recall"; });
+  }
+  recBtn.addEventListener("click", doRecall);
+  recQuery.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); doRecall(); } });
 
   /* ---- docs modal ---- */
   var overlay = $("docsOverlay");
-  var benchWrap = document.querySelector(".wrap");
-  // While an overlay is up, make the bench inert so Tab cannot land on the
+  var pageWrap = document.querySelector(".wrap");
+  // While an overlay is up, make the page inert so Tab cannot land on the
   // controls behind it, and move focus into and back out of the dialog.
   function openDocs() {
     overlay.classList.add("on"); document.body.style.overflow = "hidden";
-    if (benchWrap) benchWrap.inert = true;
+    if (pageWrap) pageWrap.inert = true;
     $("docsClose").focus();
   }
   function closeDocs() {
     overlay.classList.remove("on"); document.body.style.overflow = "";
-    if (benchWrap) benchWrap.inert = false;
+    if (pageWrap) pageWrap.inert = false;
     $("docsBtn").focus();
   }
   $("docsBtn").addEventListener("click", openDocs);
@@ -920,233 +1024,15 @@ agent-qa https://your-server.example/mcp <span class="fl">--json</span> &gt; rep
     });
   });
 
-  /* ---- scan animation: hex stream + stepping label ---- */
-  var scanTimer = null, hexTimer = null, pct = 0;
-  function randHexLine() {
-    var s = ""; for (var i = 0; i < 58; i++) s += HEX[(Math.random() * 16) | 0];
-    return s.replace(/(.{2})/g, "$1 ").trim();
-  }
-  function startScan() {
-    errorBox.classList.remove("on"); report.classList.remove("on");
-    scan.classList.add("on"); runBtn.disabled = true;
-    setStatus("running", false); pct = 0;
-    var i = 0; scanStep.textContent = SCAN_STEPS[0];
-    scanTimer = setInterval(function () { i = (i + 1) % SCAN_STEPS.length; scanStep.textContent = SCAN_STEPS[i]; }, 620);
-    if (!reduceMotion) {
-      var lines = [], blipN = 0;
-      hexTimer = setInterval(function () {
-        lines.push(randHexLine()); if (lines.length > 7) lines.shift();
-        stream.textContent = lines.join("\n");
-        pct = Math.min(97, pct + Math.random() * 9); scanPct.textContent = ("0" + Math.floor(pct)).slice(-2) + "%";
-        if ((blipN++ % 3) === 0) dataBlip();   // sparse telemetry, not a solid tone
-      }, 90);
-    }
-  }
-  function stopScan() {
-    scan.classList.remove("on"); runBtn.disabled = false;
-    clearInterval(scanTimer); clearInterval(hexTimer); scanTimer = hexTimer = null;
-  }
-  function setStatus(txt, fail) {
-    $("bootLine").textContent = "System · " + txt;
-    var led = $("led");
-    led.classList.remove("fail");
-    if (fail) { led.classList.remove("live"); led.classList.add("fail"); }
-  }
-
-  var inFlight = false;
-  form.addEventListener("submit", function (e) {
-    e.preventDefault();
-    if (inFlight) return;                 // ignore a second submit while one runs
-    var url = urlInput.value.trim(); if (!url) return;
-    if (audioOn && ac && ac.state === "suspended") ac.resume();
-    inFlight = true;
-    startScan();
-    // An evaluation can run up to the server's budget; cap the wait so a hung
-    // endpoint does not spin the scan forever with no way out.
-    var controller = new AbortController();
-    var deadline = setTimeout(function () { controller.abort(); }, 150000);
-    fetch("/evaluate", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ endpoint_url: url }),
-      signal: controller.signal
-    }).then(function (res) {
-      // Read as text first: an error from a proxy may be HTML, not JSON, and
-      // res.json() would then throw and be mistaken for a network failure.
-      return res.text().then(function (text) {
-        var body = null;
-        try { body = text ? JSON.parse(text) : null; } catch (_) { body = null; }
-        return { ok: res.ok, status: res.status, body: body };
-      });
-    }).then(function (r) {
-      stopScan();
-      if (!r.ok) {
-        var d = r.body && r.body.detail;
-        return fail(d ? (typeof d === "string" ? d : JSON.stringify(d))
-                      : ("The service returned an error (HTTP " + r.status + ")."));
-      }
-      if (!r.body || typeof r.body !== "object") {
-        return fail("The service returned an unexpected response.");
-      }
-      try { render(r.body); }
-      catch (err) { fail("Could not display the report. " + err.message); }
-    }).catch(function (err) {
-      stopScan();
-      if (err.name === "AbortError") {
-        fail("Evaluation timed out. The endpoint took too long to respond.");
-      } else {
-        fail("Could not reach the evaluation service. " + err.message);
-      }
-    }).then(function () {
-      clearTimeout(deadline); inFlight = false;
-    });
-  });
-
-  function fail(msg) {
-    setStatus("fault", true);
-    errorMsg.textContent = " " + msg; errorBox.classList.add("on");
-    errorBox.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  }
-
-  function render(rep) {
-    setStatus(rep.reachable ? "ok · grade " + rep.grade : "unreachable", !rep.reachable);
-    // Read out one rising beep per category as the bars fill, then a confirm tone.
-    readout(Object.keys(rep.category_scores || {}).length);
-    var b = band(rep.overall_score || 0);
-    var seal = $("seal"); seal.className = "seal grade-" + b;
-    var lt = $("gradeLetter"); lt.textContent = rep.grade || "?";
-    lt.style.animation = "none"; void lt.offsetWidth; lt.style.animation = "";
-    countTo($("scoreVal"), rep.overall_score || 0, 900);
-    var reach = $("reach");
-    reach.className = "reach " + (rep.reachable ? "ok" : "no");
-    reach.textContent = rep.reachable ? "● reachable" : "● unreachable";
-
-    var gl = $("gaugeList"); gl.innerHTML = "";
-    CAT_ORDER.forEach(function (cat) {
-      var cs = rep.category_scores || {}; if (!(cat in cs)) return;
-      var score = cs[cat], cb = band(score);
-      var g = el("div", "gauge");
-      var row = el("div", "grow");
-      row.appendChild(el("span", "gn", CAT_LABELS[cat] || cat));
-      var v = el("span", "gv grade-" + cb, "0"); row.appendChild(v);
-      g.appendChild(row);
-      var track = el("div", "track"); var fill = el("div", "fill grade-" + cb); track.appendChild(fill); g.appendChild(track);
-      gl.appendChild(g);
-      countTo(v, score, 850);
-      requestAnimationFrame(function () { requestAnimationFrame(function () { fill.style.width = Math.max(2, score) + "%"; }); });
-    });
-
-    var notes = $("notes"); notes.innerHTML = "";
-    function note(tag, txt) { if (!txt) return; var n = el("div", "n"); n.appendChild(el("b", null, tag)); n.appendChild(document.createTextNode(txt)); notes.appendChild(n); }
-    if (rep.connection) note("conn", rep.connection.note);
-    if (rep.latency) note("lat", rep.latency.note);
-
-    var tools = rep.tools || []; $("toolCount").textContent = tools.length;
-    var tl = $("toolList"), pager = $("toolPager");
-    var TOOLS_PER_PAGE = 6;
-    function toolCard(t) {
-      var card = el("div", "tool");
-      var hd = el("div", "tool-hd");
-      hd.appendChild(el("div", "tool-nm", t.tool_name));
-      hd.appendChild(el("div", "tool-sc", "score " + Math.round(t.score || 0) + "/100"));
-      card.appendChild(hd);
-      var cks = el("div", "checks");
-      (t.checks || []).forEach(function (c) {
-        var chip = el("div", "check " + (c.passed ? "pass" : "fail"));
-        chip.appendChild(el("span", "mk", c.passed ? "✓" : "✕"));
-        chip.appendChild(el("span", "tag", (CAT_LABELS[c.category] || c.category).split(" ")[0]));
-        var nt = el("span", "nt", c.note); nt.title = c.note; chip.appendChild(nt);
-        // Click or Enter/Space opens the chip to its full note (they truncate).
-        chip.tabIndex = 0;
-        chip.setAttribute("role", "button");
-        chip.setAttribute("aria-expanded", "false");
-        function toggleChip() {
-          var open = chip.classList.toggle("open");
-          chip.setAttribute("aria-expanded", open ? "true" : "false");
-        }
-        chip.addEventListener("click", toggleChip);
-        chip.addEventListener("keydown", function (e) {
-          if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleChip(); }
-        });
-        cks.appendChild(chip);
-      });
-      card.appendChild(cks);
-      return card;
-    }
-    tl.innerHTML = ""; pager.innerHTML = "";
-    if (!tools.length) {
-      var e0 = el("div", "check"); e0.appendChild(el("span", "nt", "No tools listed by this server.")); tl.appendChild(e0);
-    } else if (tools.length <= TOOLS_PER_PAGE) {
-      tools.forEach(function (t) { tl.appendChild(toolCard(t)); });
-    } else {
-      // Page long tool lists (Nansen lists 37) so the report does not scroll on.
-      var pages = Math.ceil(tools.length / TOOLS_PER_PAGE), page = 0;
-      function showPage(scroll) {
-        var start = page * TOOLS_PER_PAGE, stop = Math.min(start + TOOLS_PER_PAGE, tools.length);
-        tl.innerHTML = "";
-        tools.slice(start, stop).forEach(function (t) { tl.appendChild(toolCard(t)); });
-        pager.innerHTML = "";
-        var prev = el("button", "pg-btn", "‹ prev"); prev.type = "button"; prev.disabled = page === 0;
-        prev.addEventListener("click", function () { if (page > 0) { page--; showPage(true); } });
-        var info = el("span", "pg-info",
-          "page " + (page + 1) + " / " + pages + " · " + (start + 1) + "–" + stop + " of " + tools.length);
-        var next = el("button", "pg-btn", "next ›"); next.type = "button"; next.disabled = page >= pages - 1;
-        next.addEventListener("click", function () { if (page < pages - 1) { page++; showPage(true); } });
-        pager.appendChild(prev); pager.appendChild(info); pager.appendChild(next);
-        if (scroll) tl.scrollIntoView({ behavior: "smooth", block: "start" });
-      }
-      showPage(false);
-    }
-
-    var issues = rep.top_issues || [];
-    var dl = $("defectList"), none = $("noDefects");
-    dl.innerHTML = "";
-    if (!issues.length) { none.style.display = "block"; dl.style.display = "none"; }
-    else { none.style.display = "none"; dl.style.display = "grid"; issues.forEach(function (m) { dl.appendChild(el("li", null, m)); }); }
-
-    loadReputation(rep.url);
-
-    report.classList.add("on");
-    report.scrollIntoView({ behavior: "smooth", block: "start" });
-  }
-
-  // Recall this endpoint's remembered track record from Walrus. Query by host
-  // (which recalls reliably), then keep only records that mention this endpoint,
-  // so the panel shows its own history and nothing else. The panel stays hidden
-  // when the reputation memory is not configured.
-  function loadReputation(url) {
-    var box = $("repBox"), lead = $("repLead"), list = $("repList");
-    if (!box) return;
-    list.innerHTML = ""; box.style.display = "none";
-    if (!url) return;
-    var host = url;
-    try { host = new URL(url).host; } catch (e) {}
-    lead.textContent = "Recalling track record from Walrus…";
-    box.style.display = "block";
-    fetch("/reputation?q=" + encodeURIComponent(host + " reliability grade") + "&limit=12")
-      .then(function (r) { return r.json(); })
-      .then(function (d) {
-        if (!d || !d.memory_enabled) { box.style.display = "none"; return; }
-        var recs = (d.records || []).filter(function (m) { return host && m.indexOf(host) !== -1; });
-        if (!recs.length) {
-          lead.textContent = "First time Agent QA has graded this endpoint. This verdict starts its record on Walrus.";
-          return;
-        }
-        lead.textContent = "Agent QA remembers this endpoint. Any agent can recall this before trusting it:";
-        recs.forEach(function (m) { list.appendChild(el("li", null, m)); });
-      })
-      .catch(function () { box.style.display = "none"; });
-  }
-
   /* ---------------------------- Boot intro --------------------------- */
-  // Mirrors avow's Intro.tsx: a gated boot sequence that lands on the bench.
+  // A gated boot sequence that lands on the console.
   (function initIntro() {
     var intro = $("intro"), body = $("introBody"), statusEl = $("introStatus");
     var muteBtn = $("introMute"), skipBtn = $("introSkip");
-    var HEXCH = "0123456789abcdef";
-    function randHex(n) { var s = ""; for (var i = 0; i < n; i++) s += HEXCH[(Math.random() * 16) | 0]; return s; }
+    function randHex(n) { var s = ""; for (var i = 0; i < n; i++) s += HEX[(Math.random() * 16) | 0]; return s; }
 
     // The boot gate plays once per browser session, not on every load, so a
-    // refresh keeps you on the bench instead of replaying the whole sequence.
+    // refresh keeps you on the console instead of replaying the whole sequence.
     // Reduced motion always skips it; "?intro" forces it for a demo.
     var forceIntro = /[?&]intro\b/.test(location.search);
     var seenIntro = false;
@@ -1157,15 +1043,15 @@ agent-qa https://your-server.example/mcp <span class="fl">--json</span> &gt; rep
     }
     try { sessionStorage.setItem("aqa_intro_seen", "1"); } catch (e) {}
 
-    // The bench sits behind the boot overlay; make it inert so keyboard focus
+    // The console sits behind the boot overlay; make it inert so keyboard focus
     // stays in the boot sequence until it is dismissed.
-    if (benchWrap) benchWrap.inert = true;
+    if (pageWrap) pageWrap.inert = true;
 
     var timers = [];
     function clearTimers() { timers.forEach(function (t) { clearTimeout(t); clearInterval(t); }); timers = []; }
 
-    var STATUS = { gate: "standby", power: "online", init: "link", probe: "probe", verify: "score", confirm: "ok", resolve: "ok" };
-    var ORDER = ["power", "init", "probe", "verify", "confirm", "resolve"];
+    var STATUS = { gate: "standby", power: "online", init: "link", sync: "sync", index: "index", confirm: "ok", resolve: "ok" };
+    var ORDER = ["power", "init", "sync", "index", "confirm", "resolve"];
 
     function globeSVG() {
       return '<div class="i-globe"><svg viewBox="0 0 200 200" fill="none">'
@@ -1194,26 +1080,26 @@ agent-qa https://your-server.example/mcp <span class="fl">--json</span> &gt; rep
       if (p === "gate") {
         body.innerHTML = '<div class="gate"><div class="i-headline i-glow i-aberrate">AGENT<b>·</b>QA</div>'
           + '<button class="gate-btn" id="introInit">&#9656; Initialize</button>'
-          + '<div class="gate-sub">schema · fuzz · latency · descriptions</div></div>';
+          + '<div class="gate-sub">remember · recall · encrypted · yours</div></div>';
         $("introInit").addEventListener("click", begin);
         $("introInit").focus();
       } else if (p === "power") {
-        body.innerHTML = '<div class="i-headline i-glow i-aberrate i-cursor">AGENT·QA // RELIABILITY BENCH ONLINE</div>';
+        body.innerHTML = '<div class="i-headline i-glow i-aberrate i-cursor">AGENT·QA // MEMORY CORE ONLINE</div>';
       } else if (p === "init") {
         body.innerHTML = globeSVG()
           + '<div class="i-sys i-glow">INITIALIZING</div>'
-          + '<div class="i-sys">LOADING PROBE ENGINE <span class="dim">· MCP RUNTIME</span><span class="i-cursor"></span></div>';
-      } else if (p === "probe") {
-        body.innerHTML = '<div class="i-sys i-glow">PROBING ENDPOINT</div>'
+          + '<div class="i-sys">LINKING WALRUS STORAGE <span class="dim">· MEMWAL RELAY</span><span class="i-cursor"></span></div>';
+      } else if (p === "sync") {
+        body.innerHTML = '<div class="i-sys i-glow">SYNCING ENCRYPTED MEMORY</div>'
           + '<div class="i-hex" id="introHex"></div>'
-          + '<div class="i-sys dim">SCHEMA · MALFORMED INPUT · LATENCY · DESCRIPTIONS</div>';
-      } else if (p === "verify") {
-        body.innerHTML = '<div class="i-sys i-glow">SCORING RELIABILITY…</div>'
+          + '<div class="i-sys dim">CIPHERTEXT ONLY · YOUR PASSPHRASE IS THE KEY</div>';
+      } else if (p === "index") {
+        body.innerHTML = '<div class="i-sys i-glow">INDEXING FOLDERS…</div>'
           + '<div class="i-ticks" id="introTicks"></div>'
-          + '<div class="i-sys dim">COMPUTING CATEGORY GRADES · A TO F</div>';
+          + '<div class="i-sys dim">ONE FOLDER PER PROJECT · ONE MEMORY PER PERSON</div>';
         renderTicks();
       } else if (p === "confirm" || p === "resolve") {
-        body.innerHTML = '<div class="i-confirm">RELIABILITY REPORT READY ✓</div>';
+        body.innerHTML = '<div class="i-confirm">MEMORY READY ✓</div>';
       }
       if (p !== "gate") { var i = ORDER.indexOf(p); beep(760 + (i < 0 ? 0 : i) * 70); }
     }
@@ -1227,7 +1113,7 @@ agent-qa https://your-server.example/mcp <span class="fl">--json</span> &gt; rep
     function begin() {
       applyAudio(wantSound);                       // Initialize is the audio-start gesture
       skipBtn.style.display = "";
-      [["power", 0], ["init", 1800], ["probe", 5000], ["verify", 9000], ["confirm", 13000], ["resolve", 16000]]
+      [["power", 0], ["init", 1800], ["sync", 5000], ["index", 9000], ["confirm", 13000], ["resolve", 16000]]
         .forEach(function (s) {
           timers.push(setTimeout(function () { setPhase(s[0]); if (s[0] === "confirm") confirmTone(); }, s[1]));
         });
@@ -1243,7 +1129,7 @@ agent-qa https://your-server.example/mcp <span class="fl">--json</span> &gt; rep
     function showLaunch() {
       skipBtn.style.display = "none";
       var b = document.createElement("button");
-      b.className = "gate-btn launch-btn"; b.textContent = "Enter bench ▸";
+      b.className = "gate-btn launch-btn"; b.textContent = "Enter console ▸";
       b.addEventListener("click", finish);
       body.appendChild(b);
       b.focus();
@@ -1251,8 +1137,8 @@ agent-qa https://your-server.example/mcp <span class="fl">--json</span> &gt; rep
 
     function finish() {
       clearTimers();
-      // Hand the bench back to the keyboard before the overlay leaves.
-      if (benchWrap) benchWrap.inert = false;
+      // Hand the console back to the keyboard before the overlay leaves.
+      if (pageWrap) pageWrap.inert = false;
       intro.classList.add("is-leaving");
       setTimeout(function () { intro.remove(); }, 850);
     }
