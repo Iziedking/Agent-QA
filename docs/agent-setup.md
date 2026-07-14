@@ -8,6 +8,26 @@ One memory, every agent, every device, owned by you. Any agent that speaks MCP o
 
 The user string and passphrase travel as HTTP headers set in your MCP client's configuration, never as tool arguments, so the passphrase never enters the model's context. Every note is encrypted under a key derived from your passphrase before it reaches Walrus. Whoever holds the passphrase holds the memory; a wrong passphrase decrypts nothing. Pick a strong one and connect only over HTTPS.
 
+## The friendly way: one setup per device
+
+The connector in `connector/` makes a new device a two-minute job with no secrets in any file:
+
+```
+cd connector
+npm install
+node bin.mjs setup
+```
+
+It asks for your identity and your passphrase. The passphrase is typed blind, confirmed twice, and stored in the operating system's credential store (Credential Manager on Windows, Keychain on macOS, libsecret on Linux). Setup then prints the one line that wires any agent:
+
+```
+claude mcp add agent-memory -- node "<path to>/connector/bin.mjs"
+```
+
+The agent talks to a local proxy over stdio; the proxy reads the passphrase from the credential store at runtime and attaches the headers to every HTTPS call. Every agent on the device shares the same memory, none of them ever sees the passphrase, and nothing secret sits in a config file, an env var, or a shell history. `node bin.mjs status` shows what is configured (never the value); `node bin.mjs reset` removes it.
+
+The sections below wire clients directly with headers instead, which works everywhere the connector has not been set up.
+
 ## Claude Code
 
 One command:
@@ -109,6 +129,16 @@ Every note should stand alone for a stranger:
 Walrus is immutable storage, so nothing can reach in and erase a written blob; it expires when its paid storage period lapses. `forget` is therefore implemented as revocation, not erasure: each folder carries a generation number, forgetting bumps it, and the service never serves the old generation again. The old ciphertext remains on Walrus until expiry, sealed under your passphrase, unreadable without it. This is the same reason losing your passphrase is permanent: destroyed key, dead data. Deletion by key destruction is the only deletion immutable storage can offer, and we say so rather than pretend otherwise.
 
 Operators have one more lever: `AGENT_MEMORY_RETIRED_USERS`, a comma-separated list of identities the service refuses to serve entirely, for retiring a compromised or abandoned identity. Retired identities get nothing back on recall and cannot write.
+
+## Giving a single-purpose agent memory (for builders)
+
+A trading agent, a wallet rescue agent, or a support agent does not need MCP to carry memory; the REST API is three calls. The pattern that makes it feel right for non-coders using your agent:
+
+1. **Ask once, like connecting an exchange.** Your agent's settings screen asks the user for a memory passphrase in a normal password field, one time, and keeps it in the agent's own secure storage next to its other credentials. From then on the user just sees "Memory: connected".
+2. **Follow the ritual in code.** On startup, `POST /recall` with the strategy's folder to load state. After every trade or decision, `POST /remember` with a dated, concrete note and show the returned Walrus receipt in the activity log. On shutdown, write one digest note.
+3. **Point users at the console for trust.** Anyone can open the site, enter the same identity and passphrase, and independently read everything the agent remembered. The user audits the agent's memory directly rather than taking the agent's word for it, and the same memory follows them if they switch to a different agent tomorrow.
+
+A note like "2026-07-14: bought 0.5 ETH at 3,842 USDC on OKX DEX, stop at 3,690, tx 0x8f3a...c21, reason: breakout above 3,800 with volume" recalls extremely well, because trading is full of hard tokens: symbols, amounts, hashes, price levels.
 
 ## Self-hosting
 
