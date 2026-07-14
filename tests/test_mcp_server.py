@@ -34,6 +34,31 @@ async def test_remember_tool_stores(monkeypatch):
     }
 
 
+async def test_remember_tool_returns_receipt(monkeypatch):
+    _identity(monkeypatch)
+
+    async def fake_remember(user_key, passphrase, content, folder=""):
+        return {"stored": True, "enabled": True, "receipt": "walrus-blob-123"}
+
+    monkeypatch.setattr(srv, "remember_memory", fake_remember)
+    out = await remember("a decision", "project-x")
+    assert out["stored"] is True
+    assert out["receipt"] == "walrus-blob-123"
+
+
+async def test_remember_tool_reports_unconfirmed_write(monkeypatch):
+    _identity(monkeypatch)
+
+    async def fake_remember(user_key, passphrase, content, folder=""):
+        return {"stored": False, "enabled": True, "note": "write not confirmed: timeout"}
+
+    monkeypatch.setattr(srv, "remember_memory", fake_remember)
+    out = await remember("a decision", "project-x")
+    assert out["stored"] is False
+    assert "write not confirmed" in out["note"]
+    assert "receipt" not in out
+
+
 async def test_recall_tool_returns_records(monkeypatch):
     _identity(monkeypatch)
 
@@ -45,6 +70,19 @@ async def test_recall_tool_returns_records(monkeypatch):
     assert out["records"] == ["prefers dark mode"]
     assert out["memory_enabled"] is True
     assert "Recalled" in out["note"]
+    assert out["truncated"] is False
+
+
+async def test_recall_tool_flags_incomplete_scan(monkeypatch):
+    _identity(monkeypatch)
+
+    async def fake_recall(user_key, passphrase, query, folder=""):
+        return {"query": query, "enabled": True, "records": ["a note"], "truncated": True}
+
+    monkeypatch.setattr(srv, "recall_memory", fake_recall)
+    out = await recall("anything", "project-x")
+    assert out["truncated"] is True
+    assert "incomplete" in out["note"]
 
 
 async def test_recall_tool_graceful_when_memory_off(monkeypatch):
