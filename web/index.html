@@ -510,8 +510,8 @@
           <pre>npx agent-memory-connect setup</pre>
         </div>
         <div class="codeblock">
-          <div class="cbhd"><span>then wire any agent</span><button class="copy" type="button">COPY</button></div>
-          <pre>claude mcp add agent-memory <span class="fl">--</span> npx -y agent-memory-connect</pre>
+          <div class="cbhd"><span>then wire any agent · -s user covers every project on the device</span><button class="copy" type="button">COPY</button></div>
+          <pre>claude mcp add <span class="fl">-s user</span> agent-memory <span class="fl">--</span> npx -y agent-memory-connect</pre>
         </div>
         <div class="codeblock">
           <div class="cbhd"><span>or directly, claude code · one command</span><button class="copy" type="button">COPY</button></div>
@@ -619,8 +619,9 @@
             <p>It asks for your identity and your passphrase, confirms the passphrase twice, and prints the one line that wires any agent:</p>
             <div class="codeblock">
               <div class="cbhd"><span>wire any agent</span><button class="copy" type="button">COPY</button></div>
-              <pre>claude mcp add agent-memory <span class="fl">--</span> npx -y agent-memory-connect</pre>
+              <pre>claude mcp add <span class="fl">-s user</span> agent-memory <span class="fl">--</span> npx -y agent-memory-connect</pre>
             </div>
+            <p><code>-s user</code> makes the memory available in every project on the device, which is usually what you want; drop it to wire only the current project directory.</p>
             <p>The agent talks to a local proxy; the proxy reads the passphrase from the credential store at request time and attaches the headers. Every agent on the device shares the same memory, and none of them ever sees the passphrase. <code>npx agent-memory-connect status</code> shows what is configured, never the value; <code>reset</code> removes it. A headless server with no credential store is told so and offered a fallback file readable only by that account, written only with an explicit yes.</p>
             <p>The sections below wire clients directly with headers instead, which works anywhere without the connector.</p>
             <h3>Claude Code</h3>
@@ -1013,10 +1014,15 @@
           beep(700 + i * 60);
         });
         if (!recs.length) {
-          recNote.className = "rec-note";
-          recNote.textContent = r.body.memory_enabled === false
-            ? "Memory is not configured on the server yet."
-            : "Nothing came back. Either nothing relevant is remembered in this folder, or the passphrase is not the one the notes were written under.";
+          if (r.body.locked) {
+            recNote.className = "rec-note warn";
+            recNote.textContent = "This folder holds notes, but this passphrase opens none of them. The memory is not empty; the passphrase is wrong.";
+          } else {
+            recNote.className = "rec-note";
+            recNote.textContent = r.body.memory_enabled === false
+              ? "Memory is not configured on the server yet."
+              : "Nothing relevant is remembered in this folder yet.";
+          }
           recNote.style.display = "block";
         } else if (r.body.truncated) {
           recNote.className = "rec-note warn";

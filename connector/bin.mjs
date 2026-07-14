@@ -27,7 +27,7 @@ const CONFIG_FILE = join(CONFIG_DIR, "config.json");
 // Fallback secret location for machines with no OS credential store (headless
 // servers). Written 0600 and used only with the user's explicit consent.
 const SECRET_FILE = join(CONFIG_DIR, "secret");
-const VERSION = "0.1.1";
+const VERSION = "0.1.2";
 
 // --- config (non-secret: identity and endpoint only) ------------------------
 
@@ -111,12 +111,18 @@ async function setup() {
   console.log("credential store. It never sits in a config file or an env var.\n");
 
   const existing = loadConfig();
-  const user = (await promptVisible(`Identity${existing ? ` [${existing.user}]` : ""} (e.g. you@example.com): `)) ||
-    (existing ? existing.user : "");
+  const user = (await promptVisible(
+    `Identity, the address that names your memory, e.g. you@example.com` +
+    `${existing ? ` (Enter keeps ${existing.user})` : ""}: `
+  )) || (existing ? existing.user : "");
   if (!user) { console.error("An identity is required."); process.exit(1); }
 
-  const urlIn = await promptVisible(`Memory endpoint [${(existing && existing.url) || DEFAULT_URL}]: `);
-  const url = urlIn || (existing && existing.url) || DEFAULT_URL;
+  const defaultUrl = (existing && existing.url) || DEFAULT_URL;
+  const urlIn = await promptVisible(
+    `Memory endpoint. Press Enter for the hosted service (${defaultUrl}),\n` +
+    `or paste your own if you self-host: `
+  );
+  const url = urlIn || defaultUrl;
 
   const pass = await promptHidden("Passphrase (blind typed): ");
   if (!pass) { console.error("A passphrase is required."); process.exit(1); }
@@ -145,13 +151,29 @@ async function setup() {
   }
   saveConfig({ user, url });
 
-  // A quick reachability check so a typo in the endpoint surfaces now.
+  // Verify against the live memory now, so a mistyped passphrase surfaces at
+  // setup instead of masquerading as an empty memory later. The default space
+  // is probed because the folder signpost convention keeps a note there.
   try {
-    const health = new URL("/health", url);
-    const r = await fetch(health, { signal: AbortSignal.timeout(10000) });
-    console.log(`\nEndpoint check: ${r.ok ? "reachable" : `HTTP ${r.status}`} (${health.origin})`);
+    const probe = await fetch(new URL("/recall", url), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ user_key: user, passphrase: pass, query: "setup verification probe", folder: "" }),
+      signal: AbortSignal.timeout(30000),
+    });
+    const d = await probe.json();
+    if (d && d.locked) {
+      console.log("\nWARNING: this identity has existing notes, and this passphrase opens");
+      console.log("NONE of them. If you have used this memory before, the passphrase is");
+      console.log("almost certainly mistyped. Run setup again before wiring any agent.");
+    } else if (d && Array.isArray(d.records) && d.records.length) {
+      console.log("\nPassphrase verified: it opens this identity's existing notes.");
+    } else {
+      console.log("\nNo existing notes found in the default space. Fine for a brand new");
+      console.log("identity; if you expected notes here, re-check the identity spelling.");
+    }
   } catch {
-    console.log("\nEndpoint check: could not reach it right now. Stored anyway.");
+    console.log("\nCould not reach the endpoint to verify right now. Stored anyway.");
   }
 
   const self = resolve(fileURLToPath(import.meta.url));
@@ -160,14 +182,16 @@ async function setup() {
   const viaNpm = self.includes("node_modules");
   console.log(`\nStored in ${storedIn}. Wire an agent to this device's memory with one line:\n`);
   if (viaNpm) {
-    console.log("  claude mcp add agent-memory -- npx -y agent-memory-connect");
+    console.log("  claude mcp add -s user agent-memory -- npx -y agent-memory-connect");
     console.log("\nOr in any MCP client config that launches local servers:\n");
     console.log('  { "command": "npx", "args": ["-y", "agent-memory-connect"] }');
   } else {
-    console.log(`  claude mcp add agent-memory -- node "${self}"`);
+    console.log(`  claude mcp add -s user agent-memory -- node "${self}"`);
     console.log("\nOr in any MCP client config that launches local servers:\n");
     console.log(`  { "command": "node", "args": ["${self.replace(/\\/g, "\\\\")}"] }`);
   }
+  console.log("\n(-s user makes the memory available in every project on this device;");
+  console.log("drop it to wire only the current project.)");
   console.log("\nEvery agent on this device now shares the same memory, and none");
   console.log("of them ever sees the passphrase.");
 }

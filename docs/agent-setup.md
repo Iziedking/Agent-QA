@@ -19,8 +19,10 @@ npx agent-memory-connect setup
 It asks for your identity and your passphrase. The passphrase is typed blind, confirmed twice, and stored in the operating system's credential store (Credential Manager on Windows, Keychain on macOS, libsecret on Linux). Setup then prints the one line that wires any agent:
 
 ```
-claude mcp add agent-memory -- npx -y agent-memory-connect
+claude mcp add -s user agent-memory -- npx -y agent-memory-connect
 ```
+
+`-s user` makes the memory available in every project on the device, which is usually what you want; drop it to wire only the current project directory.
 
 The agent talks to a local proxy over stdio; the proxy reads the passphrase from the credential store at runtime and attaches the headers to every HTTPS call. Every agent on the device shares the same memory, none of them ever sees the passphrase, and nothing secret sits in a config file, an env var, or a shell history. `npx agent-memory-connect status` shows what is configured (never the value); `npx agent-memory-connect reset` removes it.
 
@@ -116,6 +118,7 @@ Every note should stand alone for a stranger:
 - Name concrete things: file paths, commands, amounts, addresses, endpoints.
 - State why, not just what. The reasoning is what the next session actually needs.
 - One folder per project or task, the same name every session. Folders are isolated from each other, so recall stays scoped and fast.
+- Keep a signpost note in the default space naming your folders ("Folders in use: project-x for the app build, dex-trading for the trading agent"). Folder names are private hashes on the wire, so a fresh agent that recalls the default space finds the signpost and knows where to look next.
 
 ## What the tools guarantee
 
