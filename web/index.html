@@ -708,11 +708,21 @@
 }</pre>
             </div>
             <p>The reply carries <code>records</code>, the decrypted best matches, and <code>truncated</code>, which is true when the folder holds more than could be scanned.</p>
+            <div class="codeblock">
+              <div class="cbhd"><span>POST /forget</span><button class="copy" type="button">COPY</button></div>
+              <pre><span class="cm"># request body</span>
+{
+  <span class="fl">"user_key"</span>: "you@example.com",
+  <span class="fl">"passphrase"</span>: "your-passphrase",
+  <span class="fl">"folder"</span>: "dex-trading"
+}</pre>
+            </div>
+            <p>Forget retires a folder permanently: no recall returns its notes again, and the folder starts fresh for new writes. It is honoured only when the passphrase actually opens the folder, so an identity string alone cannot wipe anything.</p>
             <h3>Other routes</h3>
             <ul>
               <li><code>GET /health</code> returns a liveness check for hosting and monitoring.</li>
               <li><code>GET /</code> serves this console.</li>
-              <li><code>/mcp</code> is the MCP endpoint: tools <code>remember</code> and <code>recall</code>, identity from the <code>X-Memory-User</code> and <code>X-Memory-Passphrase</code> headers.</li>
+              <li><code>/mcp</code> is the MCP endpoint: tools <code>remember</code>, <code>recall</code>, and <code>forget</code>, identity from the <code>X-Memory-User</code> and <code>X-Memory-Passphrase</code> headers.</li>
             </ul>
           </section>
 
@@ -722,6 +732,8 @@
             <p>Whoever holds your identity string and your passphrase, and no one else. Every note is encrypted under a key derived from your passphrase before it reaches Walrus. The operator of this service cannot read your notes; neither can anyone who finds the ciphertext. A wrong passphrase decrypts nothing and returns nothing.</p>
             <div class="faq-q">What if I lose the passphrase?</div>
             <p>The memory stays sealed, permanently. There is no reset and no recovery, because a reset path for you would be a reading path for someone else. That is the price of the operator not being able to read your notes; treat the passphrase accordingly.</p>
+            <div class="faq-q">Can I delete a folder?</div>
+            <p>You can forget it, and we are precise about what that means. Walrus is immutable storage, so nothing can reach in and erase a written blob; it expires when its paid storage lapses. <code>forget</code> retires the folder instead: the service never serves those notes again, and the folder starts fresh for new writes. The request is honoured only when your passphrase actually opens the folder, so knowing someone's identity string alone cannot wipe anything. The old ciphertext stays sealed under your passphrase until it expires, which is the same reason a lost passphrase is permanent: key destruction is the only true delete on immutable storage.</p>
             <div class="faq-q">Where does the memory live?</div>
             <p>On Walrus, as encrypted blobs, written through MemWal. Each confirmed write returns the blob id as a receipt, so a note is not just stored but provable. The service in front is stateless; you can point your agents at this one or run your own with the published compose files, and the memory model does not change.</p>
             <div class="faq-q">What counts as one memory?</div>
