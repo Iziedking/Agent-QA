@@ -230,10 +230,10 @@ const server = createServer(async (req, res) => {
     // receipt. A failure is reported as ok:false with the reason.
     if (req.method === "POST" && url.pathname === "/remember") {
       const body = await readJson(req);
-      const user = (body.user || "").toString().trim();
+      const user = (body.user || "").toString().trim().toLowerCase();
       const passphrase = (body.passphrase || "").toString();
       const text = (body.text || "").toString().trim();
-      const folder = (body.folder || "").toString().trim();
+      const folder = (body.folder || "").toString().trim().toLowerCase();
       if (!user) return send(res, 400, { error: "user is required" });
       if (!passphrase) return send(res, 400, { error: "passphrase is required" });
       if (!text) return send(res, 400, { error: "text is required" });
@@ -260,10 +260,10 @@ const server = createServer(async (req, res) => {
     // FETCH_MAX so the whole folder is scanned; past that, say so honestly.
     if (req.method === "POST" && url.pathname === "/recall") {
       const body = await readJson(req);
-      const user = (body.user || "").toString().trim();
+      const user = (body.user || "").toString().trim().toLowerCase();
       const passphrase = (body.passphrase || "").toString();
       const query = (body.query || "").toString().trim();
-      const folder = (body.folder || "").toString().trim();
+      const folder = (body.folder || "").toString().trim().toLowerCase();
       const limit = Math.min(50, Math.max(1, Number(body.limit || 8)));
       if (!user) return send(res, 400, { error: "user is required" });
       if (!passphrase) return send(res, 400, { error: "passphrase is required" });
@@ -307,9 +307,9 @@ const server = createServer(async (req, res) => {
     // under the passphrase; it is no longer reachable through this service.
     if (req.method === "POST" && url.pathname === "/forget") {
       const body = await readJson(req);
-      const user = (body.user || "").toString().trim();
+      const user = (body.user || "").toString().trim().toLowerCase();
       const passphrase = (body.passphrase || "").toString();
-      const folder = (body.folder || "").toString().trim();
+      const folder = (body.folder || "").toString().trim().toLowerCase();
       if (!user) return send(res, 400, { error: "user is required" });
       if (!passphrase) return send(res, 400, { error: "passphrase is required" });
       if (!client) return send(res, 200, { forgotten: false, enabled: false });

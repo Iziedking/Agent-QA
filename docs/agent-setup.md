@@ -140,7 +140,7 @@ Every note should stand alone for a stranger:
 - Start with the date. "2026-07-14: chose Caddy over nginx because certificates renew themselves."
 - Name concrete things: file paths, commands, amounts, addresses, endpoints.
 - State why, not just what. The reasoning is what the next session actually needs.
-- One folder per project or task, the same name every session. Folders are isolated from each other, so recall stays scoped and fast.
+- One folder per project or task, the same name every session. Folders are isolated from each other, so recall stays scoped and fast. Identity and folder names are case-insensitive, so `Agent-QA` and `agent-qa` are the same folder.
 - Keep a signpost note in the default space naming your folders ("Folders in use: project-x for the app build, dex-trading for the trading agent"). Folder names are private hashes on the wire, so a fresh agent that recalls the default space finds the signpost and knows where to look next.
 
 ## What the tools guarantee
