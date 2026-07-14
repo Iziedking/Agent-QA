@@ -36,6 +36,9 @@ services:
       - MEMWAL_PRIVATE_KEY=${MEMWAL_PRIVATE_KEY:-}
       - MEMWAL_ACCOUNT_ID=${MEMWAL_ACCOUNT_ID:-}
       - MEMWAL_SERVER_URL=${MEMWAL_SERVER_URL:-https://relayer.memwal.ai}
+      # Identities this service refuses to serve (comma separated), for
+      # retiring a compromised or abandoned identity. Set in the same .env.
+      - AGENT_MEMORY_RETIRED_USERS=${AGENT_MEMORY_RETIRED_USERS:-}
     mem_limit: 384m
     cpus: 0.5
 

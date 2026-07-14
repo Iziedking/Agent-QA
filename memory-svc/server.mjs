@@ -35,6 +35,17 @@ const RECALL_ATTEMPTS = 3;
 
 const SERVER_URL = process.env.MEMWAL_SERVER_URL || "https://relayer.memwal.ai";
 
+// Identities this service refuses to serve, comma separated. Retiring an
+// identity revokes read and write access through this service; the ciphertext
+// on Walrus stays sealed under its passphrase until it expires.
+const RETIRED = new Set(
+  (process.env.AGENT_MEMORY_RETIRED_USERS || "")
+    .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean)
+);
+function isRetired(user) {
+  return RETIRED.has(user.toLowerCase());
+}
+
 // The MemWal client is used directly (not through a convenience wrapper) so
 // write failures surface as errors we can report, instead of being logged and
 // swallowed upstream. Without credentials the sidecar runs in disabled mode.
@@ -105,14 +116,55 @@ function relevance(queryTokens, text) {
 // (user, folder) pair gets its own namespace. The "avow-" prefix and 12-char
 // slice match the format existing data was written under; changing either
 // orphans every stored memory.
-function scopeOf(user, folder) {
+function labelOf(user, folder) {
   const f = (folder || "").trim();
-  const label = f ? `${user}::${f}` : user;
-  return createHash("sha256").update(`agent-mem-scope:${label}`).digest("hex");
+  return f ? `${user}::${f}` : user;
 }
 
-function namespaceOf(user, folder) {
-  return `avow-${scopeOf(user, folder).slice(0, 12)}`;
+function scopeOf(user, folder) {
+  return createHash("sha256").update(`agent-mem-scope:${labelOf(user, folder)}`).digest("hex");
+}
+
+// --- folder generations: how forget works -----------------------------------
+//
+// Stored items carry no timestamps, so a folder cannot be forgotten by
+// filtering "items before X". Instead each folder has a generation number,
+// kept as plaintext "gen:N" markers in a control namespace. Data lives in a
+// namespace derived from (user, folder, generation); forgetting bumps the
+// generation, which moves the folder to a fresh namespace. The old ciphertext
+// stays on Walrus until it expires, but this service never serves it again.
+// Generation 0 uses the original namespace format, so folders written before
+// this feature keep working unchanged.
+
+function ctlNamespaceOf(user, folder) {
+  const h = createHash("sha256").update(`agent-mem-ctl:${labelOf(user, folder)}`).digest("hex");
+  return `avow-${h.slice(0, 12)}`;
+}
+
+function dataNamespaceOf(user, folder, generation) {
+  if (!generation) return `avow-${scopeOf(user, folder).slice(0, 12)}`;
+  const h = createHash("sha256")
+    .update(`agent-mem-scope:${labelOf(user, folder)}::gen${generation}`).digest("hex");
+  return `avow-${h.slice(0, 12)}`;
+}
+
+// The generation lookup costs one relayer round trip, so cache it briefly.
+// A single sidecar instance serves all traffic, so this cache is authoritative
+// enough; forget invalidates it immediately.
+const GEN_TTL_MS = 30000;
+const genCache = new Map(); // label -> { gen, at }
+async function generationOf(user, folder) {
+  const label = labelOf(user, folder);
+  const hit = genCache.get(label);
+  if (hit && Date.now() - hit.at < GEN_TTL_MS) return hit.gen;
+  const { blobs } = await pullFolder(ctlNamespaceOf(user, folder), "generation marker", 50);
+  let gen = 0;
+  for (const b of blobs) {
+    const m = /^gen:(\d{1,9})$/.exec(String(b).trim());
+    if (m) gen = Math.max(gen, Number(m[1]));
+  }
+  genCache.set(label, { gen, at: Date.now() });
+  return gen;
 }
 
 // --- relayer access ---------------------------------------------------------
@@ -186,9 +238,13 @@ const server = createServer(async (req, res) => {
       if (!passphrase) return send(res, 400, { error: "passphrase is required" });
       if (!text) return send(res, 400, { error: "text is required" });
       if (!client) return send(res, 200, { ok: false, enabled: false });
+      if (isRetired(user)) {
+        return send(res, 200, { ok: false, enabled: true, error: "This identity is retired on this service." });
+      }
       const blob = encrypt(keyFor(user, passphrase), text);
       try {
-        const receipt = await storeConfirmed(namespaceOf(user, folder), blob);
+        const gen = await generationOf(user, folder);
+        const receipt = await storeConfirmed(dataNamespaceOf(user, folder, gen), blob);
         return send(res, 200, { ok: true, enabled: true, blob_id: receipt.blob_id || "" });
       } catch (e) {
         return send(res, 200, {
@@ -213,8 +269,11 @@ const server = createServer(async (req, res) => {
       if (!passphrase) return send(res, 400, { error: "passphrase is required" });
       if (!query) return send(res, 400, { error: "query is required" });
       if (!client) return send(res, 200, { enabled: false, records: [] });
+      if (isRetired(user)) {
+        return send(res, 200, { enabled: true, records: [], retired: true, scanned: 0, total: 0, truncated: false });
+      }
 
-      const namespace = namespaceOf(user, folder);
+      const namespace = dataNamespaceOf(user, folder, await generationOf(user, folder));
       let { blobs, total } = await pullFolder(namespace, query, FETCH_LIMIT);
       if (total > blobs.length && blobs.length >= FETCH_LIMIT) {
         ({ blobs, total } = await pullFolder(namespace, query, Math.min(total, FETCH_MAX)));
@@ -234,6 +293,49 @@ const server = createServer(async (req, res) => {
         total,
         truncated: total > blobs.length,
       });
+    }
+
+    // Forget a folder: bump its generation so this service never serves the
+    // old notes again. Requires proof of key: when the folder holds notes, the
+    // supplied passphrase must decrypt at least one, so knowing someone's
+    // identity string alone cannot wipe their folder's visibility. Honest
+    // semantics: the old ciphertext stays on Walrus until it expires, sealed
+    // under the passphrase; it is no longer reachable through this service.
+    if (req.method === "POST" && url.pathname === "/forget") {
+      const body = await readJson(req);
+      const user = (body.user || "").toString().trim();
+      const passphrase = (body.passphrase || "").toString();
+      const folder = (body.folder || "").toString().trim();
+      if (!user) return send(res, 400, { error: "user is required" });
+      if (!passphrase) return send(res, 400, { error: "passphrase is required" });
+      if (!client) return send(res, 200, { forgotten: false, enabled: false });
+      if (isRetired(user)) {
+        return send(res, 200, { forgotten: false, enabled: true, error: "This identity is retired on this service." });
+      }
+      const gen = await generationOf(user, folder);
+      const { blobs } = await pullFolder(dataNamespaceOf(user, folder, gen), "proof of key", FETCH_LIMIT);
+      if (!blobs.length) {
+        // Nothing stored, nothing to forget; do not burn a generation on it.
+        return send(res, 200, { forgotten: true, enabled: true, note: "The folder was already empty." });
+      }
+      const key = keyFor(user, passphrase);
+      if (!blobs.some((b) => decrypt(key, b))) {
+        return send(res, 403, { error: "The passphrase does not open this folder, so it cannot forget it." });
+      }
+      try {
+        await storeConfirmed(ctlNamespaceOf(user, folder), `gen:${gen + 1}`);
+        return send(res, 200, { forgotten: true, enabled: true });
+      } catch (e) {
+        return send(res, 200, {
+          forgotten: false,
+          enabled: true,
+          error: `forget not confirmed: ${String(e?.message || e)}`,
+        });
+      } finally {
+        // Even a timed-out marker write can land late on the relayer, so the
+        // cached generation is stale either way.
+        genCache.delete(labelOf(user, folder));
+      }
     }
 
     return send(res, 404, { error: "not found" });
