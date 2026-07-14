@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '{\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"This project keeps its memory in the agent-memory MCP server (Portable Agent Memory). Before doing anything else, call recall with folder agent-qa to pick up where the last session left off, on any machine. When a decision is made, call remember right then with folder agent-qa. Before the session ends, recall first, then remember one handoff digest that supersedes earlier status notes.\"}}'"
+          }
+        ]
+      }
+    ]
+  }
+}

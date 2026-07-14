@@ -55,6 +55,10 @@ htmlcov/
 # Local MCP client config carries the user's identity; keep it out of the repo.
 .mcp.json
 
+# Internal runbooks (ours, not the product's). The public docs live alongside.
+docs/demo.md
+deploy.md
+
 # ---- Editors / OS ----
 .vscode/
 .idea/

@@ -57,9 +57,21 @@ Or per project, in a `.mcp.json` at the repo root, with the passphrase drawn fro
 }
 ```
 
-### Make recall automatic
+### Three ways to make an agent use the memory
 
-Claude Code reads the memory server's instructions on connect, so it already knows the ritual below. To guarantee the session starts from memory rather than relying on the model to think of it, add a `SessionStart` hook in `.claude/settings.json`:
+From "type it yourself" to "it just happens". Each level is a strict upgrade on the one before, and they compose.
+
+**Level 1, just ask.** Nothing to configure. Plain English in any session with the memory wired:
+
+```
+recall from agent memory, folder project-x
+```
+
+Or at the end of a session: "Write a handoff digest to agent memory: what changed, where things stand, what comes next."
+
+**Level 2, let the server ask.** Already shipped, nothing to do. The memory server sends every MCP client its instructions on connect: recall the project folder at session start, remember decisions the moment they happen, close with a handoff digest. That is why a fresh session on a machine you set up minutes ago picks up the habit on its own, and why one word from you is usually enough.
+
+**Level 3, make it automatic with a hook.** Model behaviour is probabilistic; a hook is not. A `SessionStart` hook in `.claude/settings.json` injects text into the model's context before the session begins, so the first thing the agent does is recall, whether or not it thinks of it:
 
 ```json
 {
@@ -69,7 +81,7 @@ Claude Code reads the memory server's instructions on connect, so it already kno
         "hooks": [
           {
             "type": "command",
-            "command": "echo Recall this project's folder from agent-memory before doing anything else."
+            "command": "echo '{\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"Recall folder project-x from agent-memory before doing anything else.\"}}'"
           }
         ]
       }
@@ -78,7 +90,9 @@ Claude Code reads the memory server's instructions on connect, so it already kno
 }
 ```
 
-The hook's output lands in the model's context at the start of every session, so the first thing the agent does is pick up where the last session, on any machine, left off.
+Swap `project-x` for your folder. This repository ships exactly that hook, pointed at its own folder, as a working example. The same idea works on the way out: a `SessionEnd` or `PreCompact` hook that says to write the handoff digest now.
+
+One caveat worth knowing: an agent can only write a digest if it is still running when it decides to. A session that dies mid-thought saves nothing. That is why the ritual says to remember decisions **the moment they happen**, not only at the end; notes written in the moment survive a crash, and a digest that never got written does not.
 
 ## Codex
 

@@ -647,8 +647,21 @@
   }
 }</pre>
             </div>
-            <h3>Guaranteed recall on session start</h3>
-            <p>Claude Code reads the memory server's instructions on connect, so it knows the ritual. To guarantee the session starts from memory, add a <code>SessionStart</code> hook in <code>.claude/settings.json</code>; its output lands in the model's context at the start of every session.</p>
+            <h3>Three ways to make an agent use the memory</h3>
+            <p>From "type it yourself" to "it just happens". Each level is a strict upgrade on the one before, and they compose.</p>
+            <div class="cards">
+              <div class="card"><div class="lbl">Level 1</div><div class="ttl">Just ask</div><p>Plain English in any session. "Recall from agent memory, folder project-x." Or, at the end: "Write a handoff digest to agent memory." The agent maps that to the tools.</p></div>
+              <div class="card"><div class="lbl">Level 2</div><div class="ttl">Let the server ask</div><p>Already shipped. The server sends every client the ritual on connect: recall at session start, remember decisions as they happen, digest before the end. Usually one word from you is enough.</p></div>
+              <div class="card"><div class="lbl">Level 3</div><div class="ttl">Make it automatic</div><p>A hook. Model behaviour is probabilistic; a hook is not. The text below lands in the model's context at the start of every session, so recall happens with no prompt at all.</p></div>
+              <div class="card"><div class="lbl">Note</div><div class="ttl">Write in the moment</div><p>An agent can only write a digest if it is still running when it decides to. Notes written the moment a decision happens survive a crashed session; a digest that never got written does not.</p></div>
+            </div>
+            <p><b>Level 1, just ask.</b> Nothing to configure. In any session with the memory wired:</p>
+            <div class="codeblock">
+              <div class="cbhd"><span>in the chat</span><button class="copy" type="button">COPY</button></div>
+              <pre>recall from agent memory, folder project-x</pre>
+            </div>
+            <p><b>Level 2, the server already asks.</b> The memory server ships instructions that every MCP client reads on connect, so the agent knows the ritual without being taught it. This is why a fresh session on a new machine picks up the habit on its own.</p>
+            <p><b>Level 3, a hook.</b> Add a <code>SessionStart</code> hook in <code>.claude/settings.json</code>. Its output is injected into the model's context before the session begins, so the first thing the agent does is recall, every time, whether or not it thinks of it.</p>
             <div class="codeblock">
               <div class="cbhd"><span>.claude/settings.json</span><button class="copy" type="button">COPY</button></div>
               <pre>{
@@ -656,12 +669,13 @@
     "SessionStart": [
       { "hooks": [ {
         "type": "command",
-        "command": "echo Recall this project's folder from agent-memory before doing anything else."
+        "command": "echo '{\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"Recall folder project-x from agent-memory before doing anything else.\"}}'"
       } ] }
     ]
   }
 }</pre>
             </div>
+            <p>Swap <code>project-x</code> for your folder. The same idea works on the way out: a <code>SessionEnd</code> or <code>PreCompact</code> hook that says to write a handoff digest now.</p>
             <h3>Codex</h3>
             <p>With the connector set up, add a local server to <code>~/.codex/config.toml</code>:</p>
             <div class="codeblock">
