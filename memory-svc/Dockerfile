@@ -1,5 +1,6 @@
-# Reputation memory sidecar: a small Node service that wraps the Avow SDK and
-# exposes remember / recall over HTTP for the Agent QA app to call internally.
+# Portable agent memory sidecar: a small Node service that keeps each user's
+# encrypted memory on Walrus and exposes remember / recall over HTTP for the
+# app to call internally.
 
 FROM node:20-slim
 

@@ -1,28 +1,55 @@
 // Portable, private agent memory sidecar.
 //
 // Gives any agent a private memory on Walrus, organised as user -> folder ->
-// items, through the Avow SDK. Every item is encrypted under a key derived from
-// the user's passphrase before it is stored, so at rest it is unreadable. On
-// recall, the sidecar pulls a folder's items, decrypts them transiently with the
-// passphrase supplied on that request, ranks them against the query, and returns
-// the best matches. The passphrase and the plaintext are never stored.
+// items, through the MemWal client. Every item is encrypted under a key derived
+// from the user's passphrase before it is stored, so at rest it is unreadable.
+// On recall, the sidecar pulls a folder's items, decrypts them transiently with
+// the passphrase supplied on that request, ranks them against the query, and
+// returns the best matches. The passphrase and the plaintext are never stored.
 //
-// It degrades gracefully. With no MemWal credentials the Avow memory client is a
-// no-op, so remember reports it could not store and recall returns nothing.
+// Reliability contract: a remember reply of ok:true means the relayer confirmed
+// the write reached Walrus, and the reply carries the blob id as a receipt. A
+// failed or timed-out write reports ok:false with the reason, never a silent
+// success. A recall that could not scan the whole folder says so via truncated.
+//
+// It degrades gracefully. With no MemWal credentials the client is absent, so
+// remember reports it could not store and recall returns nothing.
 
 import { createServer } from "node:http";
 import { scryptSync, randomBytes, createCipheriv, createDecipheriv, createHash } from "node:crypto";
-import { createMemory } from "avow-sdk";
+import { MemWal } from "@mysten-incubation/memwal";
 
 const PORT = Number(process.env.MEMORY_SVC_PORT || 4000);
 const HOST = process.env.MEMORY_SVC_HOST || "0.0.0.0";
 const MAX_BODY = 512 * 1024;
-// How many raw items to pull from a folder before decrypting and ranking. A
-// personal folder stays well under this.
+// First-pass pull size per folder. When the relayer reports more items than
+// this, recall refetches up to FETCH_MAX so growth past one page does not
+// silently drop older memories out of reach.
 const FETCH_LIMIT = Number(process.env.AGENT_MEMORY_FETCH_LIMIT || 100);
+const FETCH_MAX = Number(process.env.AGENT_MEMORY_FETCH_MAX || 500);
+// How long to wait for the relayer to confirm a write before reporting failure.
+// Kept under the HTTP client's own remember timeout so the caller always gets
+// a definite answer from us rather than a transport timeout.
+const REMEMBER_TIMEOUT_MS = Number(process.env.AGENT_MEMORY_REMEMBER_TIMEOUT_MS || 45000);
+const RECALL_ATTEMPTS = 3;
 
-process.env.MEMWAL_SERVER_URL = process.env.MEMWAL_SERVER_URL || "https://relayer.memwal.ai";
-const memory = createMemory();
+const SERVER_URL = process.env.MEMWAL_SERVER_URL || "https://relayer.memwal.ai";
+
+// The MemWal client is used directly (not through a convenience wrapper) so
+// write failures surface as errors we can report, instead of being logged and
+// swallowed upstream. Without credentials the sidecar runs in disabled mode.
+function createClient() {
+  const key = process.env.MEMWAL_PRIVATE_KEY;
+  const accountId = process.env.MEMWAL_ACCOUNT_ID;
+  if (!key || !accountId) return null;
+  try {
+    return MemWal.create({ key, accountId, serverUrl: SERVER_URL });
+  } catch (e) {
+    console.error("agent-memory-svc: could not create the MemWal client:", e?.message || e);
+    return null;
+  }
+}
+const client = createClient();
 
 // --- crypto: passphrase -> key, AES-256-GCM per item -----------------------
 
@@ -72,14 +99,45 @@ function relevance(queryTokens, text) {
 
 // --- storage scope ----------------------------------------------------------
 
-// The Avow namespace helper truncates its input to the first 12 characters, so a
-// raw "user::folder" string collapses different folders (and near-identical
-// users) into one namespace. Hash the scope so the distinguishing bits land in
-// those first 12 characters and every (user, folder) gets its own space.
+// Relayer namespaces are short, so a raw "user::folder" string would collapse
+// different folders (and near-identical users) into one space. Hash the scope
+// so the distinguishing bits land in the characters that are kept, and every
+// (user, folder) pair gets its own namespace. The "avow-" prefix and 12-char
+// slice match the format existing data was written under; changing either
+// orphans every stored memory.
 function scopeOf(user, folder) {
   const f = (folder || "").trim();
   const label = f ? `${user}::${f}` : user;
   return createHash("sha256").update(`agent-mem-scope:${label}`).digest("hex");
+}
+
+function namespaceOf(user, folder) {
+  return `avow-${scopeOf(user, folder).slice(0, 12)}`;
+}
+
+// --- relayer access ---------------------------------------------------------
+
+// Store one encrypted item and wait for the relayer to confirm it reached
+// Walrus. Returns the receipt; throws with the reason when the write fails.
+async function storeConfirmed(namespace, blob) {
+  return client.rememberAndWait(blob, namespace, { timeoutMs: REMEMBER_TIMEOUT_MS });
+}
+
+// Pull a folder's raw items with a couple of retries: the relayer occasionally
+// drops a request, and a stalled lookup must never sink a live answer. Returns
+// { blobs, total } where total is the relayer's count for the namespace.
+async function pullFolder(namespace, query, limit) {
+  let lastErr;
+  for (let attempt = 0; attempt < RECALL_ATTEMPTS; attempt++) {
+    try {
+      const r = await client.recall({ query, limit, namespace });
+      const blobs = (r.results ?? []).map((x) => x.text).filter(Boolean);
+      return { blobs, total: Number(r.total ?? blobs.length) };
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr ?? new Error("recall failed");
 }
 
 // --- http -------------------------------------------------------------------
@@ -112,10 +170,12 @@ const server = createServer(async (req, res) => {
     const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
 
     if (req.method === "GET" && url.pathname === "/health") {
-      return send(res, 200, { status: "ok", enabled: memory.enabled });
+      return send(res, 200, { status: "ok", enabled: client !== null });
     }
 
-    // Remember one item, encrypted, in this user's folder.
+    // Remember one item, encrypted, in this user's folder. Replies only after
+    // the relayer confirms the write, and carries the Walrus blob id back as a
+    // receipt. A failure is reported as ok:false with the reason.
     if (req.method === "POST" && url.pathname === "/remember") {
       const body = await readJson(req);
       const user = (body.user || "").toString().trim();
@@ -125,12 +185,23 @@ const server = createServer(async (req, res) => {
       if (!user) return send(res, 400, { error: "user is required" });
       if (!passphrase) return send(res, 400, { error: "passphrase is required" });
       if (!text) return send(res, 400, { error: "text is required" });
+      if (!client) return send(res, 200, { ok: false, enabled: false });
       const blob = encrypt(keyFor(user, passphrase), text);
-      await memory.remember(scopeOf(user, folder), blob);
-      return send(res, 200, { ok: true, enabled: memory.enabled });
+      try {
+        const receipt = await storeConfirmed(namespaceOf(user, folder), blob);
+        return send(res, 200, { ok: true, enabled: true, blob_id: receipt.blob_id || "" });
+      } catch (e) {
+        return send(res, 200, {
+          ok: false,
+          enabled: true,
+          error: `write not confirmed: ${String(e?.message || e)}`,
+        });
+      }
     }
 
     // Recall from this user's folder: pull, decrypt, rank, return the best.
+    // When the relayer reports more items than the first pull, refetch up to
+    // FETCH_MAX so the whole folder is scanned; past that, say so honestly.
     if (req.method === "POST" && url.pathname === "/recall") {
       const body = await readJson(req);
       const user = (body.user || "").toString().trim();
@@ -141,19 +212,28 @@ const server = createServer(async (req, res) => {
       if (!user) return send(res, 400, { error: "user is required" });
       if (!passphrase) return send(res, 400, { error: "passphrase is required" });
       if (!query) return send(res, 400, { error: "query is required" });
-      if (!memory.enabled) return send(res, 200, { enabled: false, records: [] });
+      if (!client) return send(res, 200, { enabled: false, records: [] });
 
-      const scope = scopeOf(user, folder);
-      const raw = await memory.recall(scope, query, FETCH_LIMIT);
+      const namespace = namespaceOf(user, folder);
+      let { blobs, total } = await pullFolder(namespace, query, FETCH_LIMIT);
+      if (total > blobs.length && blobs.length >= FETCH_LIMIT) {
+        ({ blobs, total } = await pullFolder(namespace, query, Math.min(total, FETCH_MAX)));
+      }
       const key = keyFor(user, passphrase);
-      const items = raw.map((b) => decrypt(key, b)).filter((t) => t && t.length);
+      const items = blobs.map((b) => decrypt(key, b)).filter((t) => t && t.length);
       const qTokens = tokenize(query);
       const ranked = items
         .map((text) => ({ text, score: relevance(qTokens, text) }))
         .sort((a, b) => b.score - a.score)
         .slice(0, limit)
         .map((x) => x.text);
-      return send(res, 200, { enabled: true, records: ranked });
+      return send(res, 200, {
+        enabled: true,
+        records: ranked,
+        scanned: items.length,
+        total,
+        truncated: total > blobs.length,
+      });
     }
 
     return send(res, 404, { error: "not found" });
@@ -163,6 +243,6 @@ const server = createServer(async (req, res) => {
 });
 
 server.listen(PORT, HOST, () => {
-  const state = memory.enabled ? "live" : "disabled (set MEMWAL_PRIVATE_KEY and MEMWAL_ACCOUNT_ID to enable)";
-  console.log(`agent-memory-svc listening on http://${HOST}:${PORT} — memory ${state}, encrypted per user`);
+  const state = client ? "live" : "disabled (set MEMWAL_PRIVATE_KEY and MEMWAL_ACCOUNT_ID to enable)";
+  console.log(`agent-memory-svc listening on http://${HOST}:${PORT} - memory ${state}, encrypted per user`);
 });

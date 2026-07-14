@@ -2,13 +2,14 @@
   "name": "agent-qa-memory-svc",
   "version": "0.1.0",
   "private": true,
-  "description": "Reputation memory sidecar for Agent QA: wraps the Avow SDK so each grade persists as portable, verifiable memory on Walrus, and agents can recall a tool's track record before trusting it.",
+  "description": "Portable agent memory sidecar: encrypts each user's items under their passphrase and keeps them on Walrus through MemWal, organised as user -> folder -> items, so any agent recalls the same memory from any machine.",
   "type": "module",
   "engines": { "node": ">=20" },
   "scripts": {
     "start": "node server.mjs"
   },
   "dependencies": {
+    "@mysten-incubation/memwal": "^0.0.7",
     "avow-sdk": "file:vendor/avow-sdk-0.3.1.tgz"
   }
 }
