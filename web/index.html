@@ -500,12 +500,21 @@
       <section>
         <div class="sec-label">Wire your agent</div>
         <div class="sec-desc">
-          The same memory through MCP. Paste one block into your agent's configuration
-          and it remembers you across machines. The identity and passphrase ride as
-          headers, so the secret never enters the model's context.
+          The same memory through MCP. On a new device, set up once: the passphrase is
+          typed blind and stored in the operating system's credential store, never in a
+          config file. Then one line wires any agent, and the identity and passphrase
+          ride as headers, so the secret never enters the model's context.
         </div>
         <div class="codeblock">
-          <div class="cbhd"><span>claude code · one command</span><button class="copy" type="button">COPY</button></div>
+          <div class="cbhd"><span>new device · one-time setup</span><button class="copy" type="button">COPY</button></div>
+          <pre>npx agent-memory-connect setup</pre>
+        </div>
+        <div class="codeblock">
+          <div class="cbhd"><span>then wire any agent</span><button class="copy" type="button">COPY</button></div>
+          <pre>claude mcp add agent-memory <span class="fl">--</span> npx -y agent-memory-connect</pre>
+        </div>
+        <div class="codeblock">
+          <div class="cbhd"><span>or directly, claude code · one command</span><button class="copy" type="button">COPY</button></div>
           <pre>claude mcp add <span class="fl">--transport http</span> agent-memory https://agentsqa.xyz/mcp <span class="fl">\</span>
   --header "X-Memory-User: you@example.com" <span class="fl">\</span>
   --header "X-Memory-Passphrase: your-passphrase"</pre>
@@ -591,6 +600,7 @@
               <li><b>Remember.</b> Your note reaches the memory service with your identity and passphrase. A key is derived from the passphrase, the note is encrypted, and the ciphertext is sealed to Walrus.</li>
               <li><b>Confirm.</b> The reply says stored only after Walrus confirms the write, and carries the blob id as a receipt. A failed write says so; it never pretends.</li>
               <li><b>Recall.</b> A query pulls the folder's ciphertext, decrypts it transiently with your passphrase, ranks it against the question, and returns the best matches. A wrong passphrase decrypts nothing.</li>
+              <li><b>Forget.</b> A folder can be retired for good: the service never serves its notes again and the folder starts fresh. Honoured only when the passphrase actually opens the folder.</li>
             </ol>
             <h3>Folders</h3>
             <p>Memory is organised as you, then folders, then notes. One folder per project or task keeps recall scoped and fast: your coding agent recalls <code>project-x</code>, your trading agent recalls <code>dex-trading</code>, and neither wades through the other's notes.</p>
@@ -600,6 +610,19 @@
             <h2>Wire your agent</h2>
             <p class="lead">One endpoint, two headers. Any agent that speaks MCP over HTTP carries the memory.</p>
             <p>The identity and passphrase ride as HTTP headers set in the client's configuration, never as tool arguments, so the secret never enters the model's context.</p>
+            <h3>The friendly way: set up a device once</h3>
+            <p>The connector stores your passphrase the way passwords should be stored: typed blind, kept in the operating system's credential store (Credential Manager on Windows, Keychain on macOS, libsecret on Linux), never in a config file, an env var, or a shell history.</p>
+            <div class="codeblock">
+              <div class="cbhd"><span>one-time setup</span><button class="copy" type="button">COPY</button></div>
+              <pre>npx agent-memory-connect setup</pre>
+            </div>
+            <p>It asks for your identity and your passphrase, confirms the passphrase twice, and prints the one line that wires any agent:</p>
+            <div class="codeblock">
+              <div class="cbhd"><span>wire any agent</span><button class="copy" type="button">COPY</button></div>
+              <pre>claude mcp add agent-memory <span class="fl">--</span> npx -y agent-memory-connect</pre>
+            </div>
+            <p>The agent talks to a local proxy; the proxy reads the passphrase from the credential store at request time and attaches the headers. Every agent on the device shares the same memory, and none of them ever sees the passphrase. <code>npx agent-memory-connect status</code> shows what is configured, never the value; <code>reset</code> removes it.</p>
+            <p>The sections below wire clients directly with headers instead, which works anywhere without the connector.</p>
             <h3>Claude Code</h3>
             <div class="codeblock">
               <div class="cbhd"><span>one command</span><button class="copy" type="button">COPY</button></div>
@@ -661,6 +684,13 @@
               <li><b>Start by recalling.</b> First thing in a session, recall with the project as the folder, so the agent continues where any previous session left off.</li>
               <li><b>Remember at the moment it matters.</b> A decision, a preference, a trade placed, a wallet recovered: stored right then, not at the end.</li>
               <li><b>Close with a handoff digest.</b> One note before the session ends: what changed, the state things were left in, what comes next.</li>
+            </ol>
+            <h3>Building memory into a single-purpose agent</h3>
+            <p>A trading agent, a wallet agent, or a support agent does not need MCP to carry memory; the REST API is three calls. The pattern that makes it feel right for people who never touch a terminal:</p>
+            <ol>
+              <li><b>Ask once, like connecting an exchange.</b> The agent's settings screen asks for a memory passphrase in a normal password field, one time, and keeps it in the agent's own secure storage. From then on the user just sees memory connected.</li>
+              <li><b>Follow the ritual in code.</b> Recall the strategy's folder on startup, remember every trade or decision as it happens and show the Walrus receipt in the activity log, write one digest on shutdown.</li>
+              <li><b>Point users here for trust.</b> This console opens the same memory with the same identity and passphrase, so a user audits what their agent remembered directly instead of taking the agent's word for it. Switch agents tomorrow and the memory comes along.</li>
             </ol>
           </section>
 
@@ -730,6 +760,10 @@
             <h2>FAQ</h2>
             <div class="faq-q">Who can read my memory?</div>
             <p>Whoever holds your identity string and your passphrase, and no one else. Every note is encrypted under a key derived from your passphrase before it reaches Walrus. The operator of this service cannot read your notes; neither can anyone who finds the ciphertext. A wrong passphrase decrypts nothing and returns nothing.</p>
+            <div class="faq-q">Do I have to put my passphrase in a config file?</div>
+            <p>No. Run <code>npx agent-memory-connect setup</code> once per device: the passphrase is typed blind and stored in the operating system's credential store, and agents connect through a local proxy that attaches it at request time. Nothing secret ever sits in a config file, an env var, or a shell history. Direct header configuration remains available for environments where the connector is not an option.</p>
+            <div class="faq-q">What do I need on a new device?</div>
+            <p>Two things, typed once: your identity and your passphrase. The identity is just an address, like a username; it says which memory to fetch and is not a secret. The passphrase is the only key. After the one-time setup, every agent on that device recalls what any other device stored, with no prompting again.</p>
             <div class="faq-q">What if I lose the passphrase?</div>
             <p>The memory stays sealed, permanently. There is no reset and no recovery, because a reset path for you would be a reading path for someone else. That is the price of the operator not being able to read your notes; treat the passphrase accordingly.</p>
             <div class="faq-q">Can I delete a folder?</div>
