@@ -12,7 +12,9 @@ WORKDIR /svc
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
-COPY server.mjs ./
+# Copy every source module, not just the entrypoint, or an import of a sibling
+# file (walrus-files.mjs) crash-loops the container.
+COPY server.mjs walrus-files.mjs ./
 
 # Run as a non-root user.
 RUN useradd --create-home --uid 10002 svcuser
