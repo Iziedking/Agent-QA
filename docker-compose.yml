@@ -39,7 +39,12 @@ services:
       # Identities this service refuses to serve (comma separated), for
       # retiring a compromised or abandoned identity. Set in the same .env.
       - AGENT_MEMORY_RETIRED_USERS=${AGENT_MEMORY_RETIRED_USERS:-}
-    mem_limit: 384m
+      # File storage. WALRUS_SUI_KEY funds Walrus blob writes (primary);
+      # ZERO_G_PRIVATE_KEY funds 0G writes (failover). Without either, file
+      # endpoints report "not configured" and notes still work.
+      - WALRUS_SUI_KEY=${WALRUS_SUI_KEY:-}
+      - ZERO_G_PRIVATE_KEY=${ZERO_G_PRIVATE_KEY:-}
+    mem_limit: 512m
     cpus: 0.5
 
   caddy:
