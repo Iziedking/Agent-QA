@@ -18,7 +18,8 @@
 import { createServer } from "node:http";
 import { scryptSync, randomBytes, createCipheriv, createDecipheriv, createHash } from "node:crypto";
 import { MemWal } from "@mysten-incubation/memwal";
-import { ensure as ensureFiles } from "./walrus-files.mjs";
+import { ensure as ensureWalrus } from "./walrus-files.mjs";
+import { ensure as ensureZeroG } from "./zerog-files.mjs";
 
 const PORT = Number(process.env.MEMORY_SVC_PORT || 4000);
 const HOST = process.env.MEMORY_SVC_HOST || "0.0.0.0";
@@ -172,6 +173,49 @@ function fileIndexNamespaceOf(user, folder) {
 }
 
 const FILE_MANIFEST_PREFIX = "aqafile1:";
+
+// --- file blob backends: Walrus primary, 0G fallback ------------------------
+//
+// A file's encrypted bytes go to Walrus first; if that write fails, they go to
+// 0G instead, so a single storage network being down does not lose the upload.
+// The stored reference records which backend holds it, as "walrus:<blobId>" or
+// "0g:<rootHash>". A bare id with no prefix is a legacy Walrus blob.
+
+async function putEncryptedBlob(encBytes) {
+  const bytes = new Uint8Array(encBytes);
+  const walrus = await ensureWalrus();
+  if (walrus.enabled) {
+    try {
+      return "walrus:" + (await walrus.putBlob(bytes));
+    } catch (e) {
+      console.error("walrus blob write failed, trying 0g:", e?.message || e);
+    }
+  }
+  const zerog = await ensureZeroG();
+  if (zerog.enabled) {
+    return "0g:" + (await zerog.putBlob(bytes));
+  }
+  throw new Error(
+    walrus.enabled ? "walrus failed and 0g is not configured" : "no file storage backend is configured"
+  );
+}
+
+async function anyFileBackendEnabled() {
+  return (await ensureWalrus()).enabled || (await ensureZeroG()).enabled;
+}
+
+async function getBlobByRef(ref) {
+  let store = "walrus";
+  let id = ref;
+  const i = ref.indexOf(":");
+  if (i > 0) {
+    const prefix = ref.slice(0, i);
+    if (prefix === "walrus" || prefix === "0g") { store = prefix; id = ref.slice(i + 1); }
+  }
+  const backend = store === "0g" ? await ensureZeroG() : await ensureWalrus();
+  if (!backend.enabled) throw new Error(`${store} storage is not configured on this server`);
+  return backend.getBlob(id);
+}
 
 function dataNamespaceOf(user, folder, generation) {
   if (!generation) return `avow-${scopeOf(user, folder).slice(0, 12)}`;
@@ -391,13 +435,13 @@ const server = createServer(async (req, res) => {
       if (!name) return send(res, 400, { error: "name is required" });
       if (!dataB64) return send(res, 400, { error: "dataBase64 is required" });
       if (isRetired(user)) return send(res, 200, { ok: false, error: "This identity is retired on this service." });
-      const files = await ensureFiles();
-      if (!files.enabled) return send(res, 200, { ok: false, files_enabled: false, error: files.error || "File storage is not configured on this server." });
+      if (!(await anyFileBackendEnabled())) return send(res, 200, { ok: false, files_enabled: false, error: "File storage is not configured on this server." });
       const raw = Buffer.from(dataB64, "base64");
       const key = keyFor(user, passphrase);
       let blobId;
       try {
-        blobId = await files.putBlob(new Uint8Array(encryptBytes(key, raw)));
+        // Walrus first, 0G on failure. blobId is a backend-tagged reference.
+        blobId = await putEncryptedBlob(encryptBytes(key, raw));
       } catch (e) {
         return send(res, 200, { ok: false, files_enabled: true, error: `blob write failed: ${String(e?.message || e)}` });
       }
@@ -461,11 +505,11 @@ const server = createServer(async (req, res) => {
       if (!passphrase) return send(res, 400, { error: "passphrase is required" });
       if (!blobId) return send(res, 400, { error: "blobId is required" });
       if (isRetired(user)) return send(res, 200, { ok: false, error: "This identity is retired on this service." });
-      const files = await ensureFiles();
-      if (!files.enabled) return send(res, 200, { ok: false, files_enabled: false, error: files.error || "File storage is not configured on this server." });
+      if (!(await anyFileBackendEnabled())) return send(res, 200, { ok: false, files_enabled: false, error: "File storage is not configured on this server." });
       let enc;
       try {
-        enc = await files.getBlob(blobId);
+        // Route to whichever backend the reference names (Walrus or 0G).
+        enc = await getBlobByRef(blobId);
       } catch (e) {
         return send(res, 200, { ok: false, error: `blob read failed: ${String(e?.message || e)}` });
       }

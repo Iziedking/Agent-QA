@@ -13,8 +13,8 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
 # Copy every source module, not just the entrypoint, or an import of a sibling
-# file (walrus-files.mjs) crash-loops the container.
-COPY server.mjs walrus-files.mjs ./
+# file crash-loops the container.
+COPY server.mjs walrus-files.mjs zerog-files.mjs ./
 
 # Run as a non-root user.
 RUN useradd --create-home --uid 10002 svcuser

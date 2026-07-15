@@ -11,7 +11,9 @@
     "start": "node server.mjs"
   },
   "dependencies": {
+    "@0gfoundation/0g-storage-ts-sdk": "^1.2.10",
     "@mysten-incubation/memwal": "^0.0.7",
-    "@mysten/walrus": "^1.1.7"
+    "@mysten/walrus": "^1.1.7",
+    "ethers": "6.13.1"
   }
 }
