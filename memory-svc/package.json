@@ -4,11 +4,14 @@
   "private": true,
   "description": "Portable agent memory sidecar: encrypts each user's items under their passphrase and keeps them on Walrus through MemWal, organised as user -> folder -> items, so any agent recalls the same memory from any machine.",
   "type": "module",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "node server.mjs"
   },
   "dependencies": {
-    "@mysten-incubation/memwal": "^0.0.7"
+    "@mysten-incubation/memwal": "^0.0.7",
+    "@mysten/walrus": "^1.1.7"
   }
 }

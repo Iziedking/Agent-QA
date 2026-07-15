@@ -27,9 +27,12 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from core import __version__ as core_version
+from core.agent_memory import download_file as download_file_memory
 from core.agent_memory import forget as forget_memory
+from core.agent_memory import list_files as list_files_memory
 from core.agent_memory import recall as recall_memory
 from core.agent_memory import remember as remember_memory
+from core.agent_memory import upload_file as upload_file_memory
 from mcp_server.server import mcp as mcp_instance
 
 # The browser-facing demo UI is a single self-contained file served same-origin,
@@ -40,6 +43,10 @@ WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 # either a mistake or an attempt to exhaust memory. Cap it well above any real
 # request. This is public and unauthenticated, so the ceiling matters.
 MAX_BODY_BYTES = int(os.environ.get("AGENT_QA_MAX_BODY_BYTES", str(1024 * 1024)))
+# File uploads carry base64 bytes and need a much larger ceiling than a note or
+# a URL. Only the upload path gets it; every other route keeps the tight cap.
+FILE_MAX_BODY_BYTES = int(os.environ.get("AGENT_QA_FILE_MAX_BODY_BYTES", str(13 * 1024 * 1024)))
+_FILE_UPLOAD_PATH = "/file/upload"
 
 
 class _BodyTooLarge(Exception):
@@ -63,11 +70,15 @@ class MaxBodySizeMiddleware:
             await self.app(scope, receive, send)
             return
 
+        # The file upload path carries base64 file bytes, so it gets a larger
+        # ceiling; every other route keeps the tight cap.
+        cap = FILE_MAX_BODY_BYTES if scope.get("path") == _FILE_UPLOAD_PATH else self.max_bytes
+
         headers = dict(scope.get("headers") or [])
         declared = headers.get(b"content-length")
         if declared is not None:
             try:
-                if int(declared) > self.max_bytes:
+                if int(declared) > cap:
                     await self._send_413(send)
                     return
             except ValueError:
@@ -81,7 +92,7 @@ class MaxBodySizeMiddleware:
             message = await receive()
             if message.get("type") == "http.request":
                 received += len(message.get("body", b""))
-                if received > self.max_bytes:
+                if received > cap:
                     raise _BodyTooLarge
             return message
 
@@ -158,6 +169,34 @@ class ForgetRequest(BaseModel):
     folder: str = Field("", max_length=256)
 
 
+class FileUploadRequest(BaseModel):
+    """Request body for ``POST /file/upload``."""
+
+    user_key: str = Field(..., max_length=256)
+    passphrase: str = Field(..., max_length=512)
+    name: str = Field(..., max_length=512)
+    folder: str = Field("", max_length=256)
+    content_type: str = Field("application/octet-stream", max_length=200)
+    # base64 of the file bytes; the middleware caps the whole request instead.
+    data_base64: str = Field(...)
+
+
+class FileListRequest(BaseModel):
+    """Request body for ``POST /file/list``."""
+
+    user_key: str = Field(..., max_length=256)
+    passphrase: str = Field(..., max_length=512)
+    folder: str = Field("", max_length=256)
+
+
+class FileDownloadRequest(BaseModel):
+    """Request body for ``POST /file/download``."""
+
+    user_key: str = Field(..., max_length=256)
+    passphrase: str = Field(..., max_length=512)
+    blob_id: str = Field(..., max_length=256)
+
+
 class HealthResponse(BaseModel):
     status: str = "ok"
     service: str = "agent-memory"
@@ -226,6 +265,32 @@ async def forget_endpoint(request: ForgetRequest) -> dict:
     honouring the request, so an identity string alone cannot wipe anything.
     """
     return await forget_memory(request.user_key, request.passphrase, request.folder)
+
+
+@app.post("/file/upload", tags=["files"])
+async def file_upload_endpoint(request: FileUploadRequest) -> dict:
+    """Encrypt a file and store it on Walrus, indexed in the folder.
+
+    The bytes are encrypted under the passphrase before they leave the server,
+    stored as a Walrus blob, and recorded in the folder's file index so they
+    can be listed and downloaded from any machine.
+    """
+    return await upload_file_memory(
+        request.user_key, request.passphrase, request.name,
+        request.data_base64, request.folder, request.content_type,
+    )
+
+
+@app.post("/file/list", tags=["files"])
+async def file_list_endpoint(request: FileListRequest) -> dict:
+    """List the files stored in a folder, decrypted metadata only."""
+    return await list_files_memory(request.user_key, request.passphrase, request.folder)
+
+
+@app.post("/file/download", tags=["files"])
+async def file_download_endpoint(request: FileDownloadRequest) -> dict:
+    """Fetch a file's Walrus blob and decrypt it under the passphrase."""
+    return await download_file_memory(request.user_key, request.passphrase, request.blob_id)
 
 
 # Mount the MCP endpoint last, so the explicit routes above take precedence and

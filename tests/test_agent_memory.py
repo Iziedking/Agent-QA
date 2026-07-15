@@ -195,3 +195,69 @@ async def test_forget_graceful_when_down(monkeypatch):
     monkeypatch.setattr(mem.httpx, "AsyncClient", _factory(fail=True))
     out = await mem.forget("ada", "s3cret")
     assert out["forgotten"] is False and "note" in out
+
+
+async def test_upload_file_ok(monkeypatch):
+    _FakeClient.posts = []
+    monkeypatch.setattr(mem, "MEMORY_SVC_URL", "http://memory:4000")
+    monkeypatch.setattr(
+        mem.httpx, "AsyncClient",
+        _factory(resp={"ok": True, "enabled": True, "files_enabled": True, "blob_id": "walrus-blob-9", "receipt": "idx-1"}),
+    )
+    out = await mem.upload_file("ada@example.com", "s3cret", "notes.zip", "QUJD", "project-x", "application/zip")
+    assert out["ok"] is True and out["blob_id"] == "walrus-blob-9" and out["receipt"] == "idx-1"
+    assert _FakeClient.posts == [{
+        "user": "ada@example.com", "passphrase": "s3cret", "folder": "project-x",
+        "name": "notes.zip", "contentType": "application/zip", "dataBase64": "QUJD",
+    }]
+
+
+async def test_upload_file_reports_index_failure(monkeypatch):
+    # The bytes reached Walrus but the index write failed: ok False, blob id kept.
+    monkeypatch.setattr(mem, "MEMORY_SVC_URL", "http://memory:4000")
+    monkeypatch.setattr(
+        mem.httpx, "AsyncClient",
+        _factory(resp={"ok": False, "enabled": True, "blob_id": "walrus-blob-9", "error": "index not confirmed: paused"}),
+    )
+    out = await mem.upload_file("ada", "s3cret", "f.bin", "QQ==")
+    assert out["ok"] is False and out["blob_id"] == "walrus-blob-9"
+    assert "index not confirmed" in out["note"]
+
+
+async def test_list_files_parses(monkeypatch):
+    monkeypatch.setattr(mem, "MEMORY_SVC_URL", "http://memory:4000")
+    monkeypatch.setattr(
+        mem.httpx, "AsyncClient",
+        _factory(resp={"enabled": True, "files": [{"name": "a.txt", "blobId": "b1"}, "junk"], "locked": False}),
+    )
+    out = await mem.list_files("ada", "s3cret", "project-x")
+    assert out["enabled"] is True
+    assert out["files"] == [{"name": "a.txt", "blobId": "b1"}]  # non-dicts dropped
+
+
+async def test_download_file_ok(monkeypatch):
+    monkeypatch.setattr(mem, "MEMORY_SVC_URL", "http://memory:4000")
+    monkeypatch.setattr(mem.httpx, "AsyncClient", _factory(resp={"ok": True, "dataBase64": "QUJD"}))
+    out = await mem.download_file("ada", "s3cret", "b1")
+    assert out["ok"] is True and out["data_base64"] == "QUJD"
+
+
+async def test_download_file_locked(monkeypatch):
+    monkeypatch.setattr(mem, "MEMORY_SVC_URL", "http://memory:4000")
+    monkeypatch.setattr(
+        mem.httpx, "AsyncClient",
+        _factory(resp={"ok": False, "locked": True, "error": "The passphrase does not open this file."}),
+    )
+    out = await mem.download_file("ada", "wrong", "b1")
+    assert out["ok"] is False and out["locked"] is True and "does not open" in out["note"]
+
+
+async def test_file_ops_graceful_when_down(monkeypatch):
+    monkeypatch.setattr(mem, "MEMORY_SVC_URL", "http://memory:4000")
+    monkeypatch.setattr(mem.httpx, "AsyncClient", _factory(fail=True))
+    up = await mem.upload_file("ada", "s3cret", "f", "QQ==")
+    assert up["ok"] is False and "note" in up
+    ls = await mem.list_files("ada", "s3cret")
+    assert ls == {"enabled": False, "files": [], "locked": False}
+    dl = await mem.download_file("ada", "s3cret", "b1")
+    assert dl["ok"] is False and "note" in dl

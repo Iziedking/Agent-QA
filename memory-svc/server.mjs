@@ -18,10 +18,14 @@
 import { createServer } from "node:http";
 import { scryptSync, randomBytes, createCipheriv, createDecipheriv, createHash } from "node:crypto";
 import { MemWal } from "@mysten-incubation/memwal";
+import { ensure as ensureFiles } from "./walrus-files.mjs";
 
 const PORT = Number(process.env.MEMORY_SVC_PORT || 4000);
 const HOST = process.env.MEMORY_SVC_HOST || "0.0.0.0";
 const MAX_BODY = 512 * 1024;
+// File uploads carry base64 bytes, so they need a much larger body cap than a
+// note. base64 inflates by about a third, so this allows roughly a 9 MB file.
+const FILE_MAX_BODY = Number(process.env.AGENT_MEMORY_FILE_MAX_BYTES || 12 * 1024 * 1024);
 // First-pass pull size per folder. When the relayer reports more items than
 // this, recall refetches up to FETCH_MAX so growth past one page does not
 // silently drop older memories out of reach.
@@ -77,6 +81,25 @@ function encrypt(key, plaintext) {
   const ct = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
   const tag = cipher.getAuthTag();
   return "enc1:" + Buffer.concat([iv, tag, ct]).toString("base64");
+}
+
+// Encrypt raw bytes into a single buffer "iv|tag|ciphertext" (no base64; the
+// file blob is stored as bytes on Walrus). Same cipher as the text path.
+function encryptBytes(key, buf) {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  const ct = Buffer.concat([cipher.update(buf), cipher.final()]);
+  return Buffer.concat([iv, cipher.getAuthTag(), ct]);
+}
+
+// Decrypt an "iv|tag|ciphertext" buffer; throws if the passphrase is wrong.
+function decryptBytes(key, buf) {
+  const iv = buf.subarray(0, 12);
+  const tag = buf.subarray(12, 28);
+  const ct = buf.subarray(28);
+  const decipher = createDecipheriv("aes-256-gcm", key, iv);
+  decipher.setAuthTag(tag);
+  return Buffer.concat([decipher.update(ct), decipher.final()]);
 }
 
 // Decrypt one item, or null if it is not ours or the passphrase is wrong.
@@ -141,6 +164,15 @@ function ctlNamespaceOf(user, folder) {
   return `avow-${h.slice(0, 12)}`;
 }
 
+// File manifests live in their own namespace, separate from notes, so a normal
+// recall of a folder never surfaces file entries and vice versa.
+function fileIndexNamespaceOf(user, folder) {
+  const h = createHash("sha256").update(`agent-mem-files:${labelOf(user, folder)}`).digest("hex");
+  return `avow-${h.slice(0, 12)}`;
+}
+
+const FILE_MANIFEST_PREFIX = "aqafile1:";
+
 function dataNamespaceOf(user, folder, generation) {
   if (!generation) return `avow-${scopeOf(user, folder).slice(0, 12)}`;
   const h = createHash("sha256")
@@ -199,13 +231,13 @@ function send(res, status, body) {
   res.end(JSON.stringify(body));
 }
 
-function readJson(req) {
+function readJson(req, maxBytes = MAX_BODY) {
   return new Promise((resolve, reject) => {
     let size = 0;
     const chunks = [];
     req.on("data", (c) => {
       size += c.length;
-      if (size > MAX_BODY) { reject(new Error("request body too large")); req.destroy(); return; }
+      if (size > maxBytes) { reject(new Error("request body too large")); req.destroy(); return; }
       chunks.push(c);
     });
     req.on("end", () => {
@@ -339,6 +371,110 @@ const server = createServer(async (req, res) => {
         // Even a timed-out marker write can land late on the relayer, so the
         // cached generation is stale either way.
         genCache.delete(labelOf(user, folder));
+      }
+    }
+
+    // Upload a file: encrypt the bytes, store them as a Walrus blob (funded by
+    // this service's own wallet), then record an encrypted manifest note in the
+    // folder's file index so the file can be listed and fetched later. The blob
+    // bytes and the manifest are both sealed under the user's passphrase.
+    if (req.method === "POST" && url.pathname === "/file/upload") {
+      const body = await readJson(req, FILE_MAX_BODY);
+      const user = (body.user || "").toString().trim().toLowerCase();
+      const passphrase = (body.passphrase || "").toString();
+      const folder = (body.folder || "").toString().trim().toLowerCase();
+      const name = (body.name || "").toString().trim();
+      const contentType = (body.contentType || "application/octet-stream").toString().slice(0, 200);
+      const dataB64 = (body.dataBase64 || "").toString();
+      if (!user) return send(res, 400, { error: "user is required" });
+      if (!passphrase) return send(res, 400, { error: "passphrase is required" });
+      if (!name) return send(res, 400, { error: "name is required" });
+      if (!dataB64) return send(res, 400, { error: "dataBase64 is required" });
+      if (isRetired(user)) return send(res, 200, { ok: false, error: "This identity is retired on this service." });
+      const files = await ensureFiles();
+      if (!files.enabled) return send(res, 200, { ok: false, files_enabled: false, error: files.error || "File storage is not configured on this server." });
+      const raw = Buffer.from(dataB64, "base64");
+      const key = keyFor(user, passphrase);
+      let blobId;
+      try {
+        blobId = await files.putBlob(new Uint8Array(encryptBytes(key, raw)));
+      } catch (e) {
+        return send(res, 200, { ok: false, files_enabled: true, error: `blob write failed: ${String(e?.message || e)}` });
+      }
+      // The manifest note travels through the memory relayer, so a listable
+      // index of files rides the same portable, per-user memory as notes.
+      if (!client) return send(res, 200, { ok: false, enabled: false, blob_id: blobId, note: "Blob stored, but memory index is disabled." });
+      const manifest = FILE_MANIFEST_PREFIX + JSON.stringify({
+        v: 1, name, size: raw.length, blobId, contentType, ts: Date.now(),
+      });
+      try {
+        const receipt = await storeConfirmed(fileIndexNamespaceOf(user, folder), encrypt(key, manifest));
+        return send(res, 200, { ok: true, enabled: true, files_enabled: true, blob_id: blobId, receipt: receipt.blob_id || "" });
+      } catch (e) {
+        // The bytes are safely on Walrus; only the index write failed. Return
+        // the blobId so the caller can retry the index or download directly.
+        return send(res, 200, { ok: false, enabled: true, blob_id: blobId, error: `index not confirmed: ${String(e?.message || e)}` });
+      }
+    }
+
+    // List the files in a folder: pull the folder's file index, decrypt each
+    // manifest, and return the file metadata. Reads only, so this works even
+    // when writes are paused.
+    if (req.method === "POST" && url.pathname === "/file/list") {
+      const body = await readJson(req);
+      const user = (body.user || "").toString().trim().toLowerCase();
+      const passphrase = (body.passphrase || "").toString();
+      const folder = (body.folder || "").toString().trim().toLowerCase();
+      if (!user) return send(res, 400, { error: "user is required" });
+      if (!passphrase) return send(res, 400, { error: "passphrase is required" });
+      if (!client) return send(res, 200, { enabled: false, files: [] });
+      if (isRetired(user)) return send(res, 200, { enabled: true, files: [], retired: true });
+      const { blobs } = await pullFolder(fileIndexNamespaceOf(user, folder), "file manifest", FETCH_MAX);
+      const key = keyFor(user, passphrase);
+      const seen = new Set();
+      const files = [];
+      let scanned = 0;
+      for (const b of blobs) {
+        const text = decrypt(key, b);
+        if (!text || !text.startsWith(FILE_MANIFEST_PREFIX)) continue;
+        scanned++;
+        try {
+          const m = JSON.parse(text.slice(FILE_MANIFEST_PREFIX.length));
+          if (m && m.blobId && !seen.has(m.blobId)) {
+            seen.add(m.blobId);
+            files.push({ name: m.name, size: m.size, blobId: m.blobId, contentType: m.contentType, ts: m.ts });
+          }
+        } catch {}
+      }
+      files.sort((a, b) => (b.ts || 0) - (a.ts || 0));
+      return send(res, 200, { enabled: true, files, locked: blobs.length > 0 && scanned === 0 });
+    }
+
+    // Download a file: fetch its Walrus blob and decrypt it. Needs only the
+    // blob id and the passphrase, so it works while writes are paused.
+    if (req.method === "POST" && url.pathname === "/file/download") {
+      const body = await readJson(req);
+      const user = (body.user || "").toString().trim().toLowerCase();
+      const passphrase = (body.passphrase || "").toString();
+      const blobId = (body.blobId || "").toString().trim();
+      if (!user) return send(res, 400, { error: "user is required" });
+      if (!passphrase) return send(res, 400, { error: "passphrase is required" });
+      if (!blobId) return send(res, 400, { error: "blobId is required" });
+      if (isRetired(user)) return send(res, 200, { ok: false, error: "This identity is retired on this service." });
+      const files = await ensureFiles();
+      if (!files.enabled) return send(res, 200, { ok: false, files_enabled: false, error: files.error || "File storage is not configured on this server." });
+      let enc;
+      try {
+        enc = await files.getBlob(blobId);
+      } catch (e) {
+        return send(res, 200, { ok: false, error: `blob read failed: ${String(e?.message || e)}` });
+      }
+      try {
+        const plain = decryptBytes(keyFor(user, passphrase), enc);
+        return send(res, 200, { ok: true, dataBase64: plain.toString("base64") });
+      } catch {
+        // The passphrase does not open this blob.
+        return send(res, 200, { ok: false, locked: true, error: "The passphrase does not open this file." });
       }
     }
 

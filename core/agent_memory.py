@@ -23,6 +23,8 @@ MEMORY_SVC_URL = os.environ.get("AGENT_MEMORY_URL", "http://127.0.0.1:4000").rst
 # A Walrus write can take a while; a recall stays snappier.
 REMEMBER_TIMEOUT = float(os.environ.get("AGENT_MEMORY_REMEMBER_TIMEOUT", "60"))
 RECALL_TIMEOUT = float(os.environ.get("AGENT_MEMORY_RECALL_TIMEOUT", "30"))
+# File blobs are larger and Walrus round trips are slower than a note.
+FILE_TIMEOUT = float(os.environ.get("AGENT_MEMORY_FILE_TIMEOUT", "180"))
 
 
 async def remember(
@@ -131,6 +133,87 @@ async def forget(user_key: str, passphrase: str, folder: str = "") -> dict[str, 
             elif not result["forgotten"]:
                 result["note"] = str(body.get("error") or "The forget was not confirmed.")
     except Exception as exc:  # noqa: BLE001 - the memory layer must never raise into the agent
+        result["note"] = f"Could not reach the memory service: {exc}"
+    return result
+
+
+async def upload_file(
+    user_key: str, passphrase: str, name: str, data_base64: str,
+    folder: str = "", content_type: str = "application/octet-stream",
+) -> dict[str, Any]:
+    """Encrypt and store a file on Walrus, indexed in the folder. Never raises."""
+    result: dict[str, Any] = {"ok": False}
+    if not MEMORY_SVC_URL:
+        result["note"] = "Memory is not configured."
+        return result
+    if not user_key or not passphrase or not name or not data_base64:
+        result["note"] = "A user key, passphrase, name, and file data are all required."
+        return result
+    try:
+        async with httpx.AsyncClient(timeout=FILE_TIMEOUT) as client:
+            resp = await client.post(
+                f"{MEMORY_SVC_URL}/file/upload",
+                json={
+                    "user": user_key, "passphrase": passphrase, "folder": folder,
+                    "name": name, "contentType": content_type, "dataBase64": data_base64,
+                },
+            )
+            resp.raise_for_status()
+            body = resp.json()
+            result["ok"] = bool(body.get("ok", False))
+            for k in ("blob_id", "receipt", "files_enabled", "error"):
+                if k in body:
+                    result[k] = body[k]
+            if not result["ok"] and "error" in body:
+                result["note"] = str(body["error"])
+    except Exception as exc:  # noqa: BLE001
+        result["note"] = f"Could not reach the memory service: {exc}"
+    return result
+
+
+async def list_files(user_key: str, passphrase: str, folder: str = "") -> dict[str, Any]:
+    """List the files in a folder, decrypted metadata only. Always well-formed."""
+    result: dict[str, Any] = {"enabled": False, "files": [], "locked": False}
+    if not MEMORY_SVC_URL or not user_key or not passphrase:
+        return result
+    try:
+        async with httpx.AsyncClient(timeout=RECALL_TIMEOUT) as client:
+            resp = await client.post(
+                f"{MEMORY_SVC_URL}/file/list",
+                json={"user": user_key, "passphrase": passphrase, "folder": folder},
+            )
+            resp.raise_for_status()
+            body = resp.json()
+            result["enabled"] = bool(body.get("enabled", False))
+            files = body.get("files") or []
+            result["files"] = [f for f in files if isinstance(f, dict)]
+            result["locked"] = bool(body.get("locked", False))
+    except Exception:  # noqa: BLE001
+        pass
+    return result
+
+
+async def download_file(user_key: str, passphrase: str, blob_id: str) -> dict[str, Any]:
+    """Fetch and decrypt a file blob. Returns base64 data or a locked/error note."""
+    result: dict[str, Any] = {"ok": False}
+    if not MEMORY_SVC_URL or not user_key or not passphrase or not blob_id:
+        result["note"] = "A user key, passphrase, and blob id are required."
+        return result
+    try:
+        async with httpx.AsyncClient(timeout=FILE_TIMEOUT) as client:
+            resp = await client.post(
+                f"{MEMORY_SVC_URL}/file/download",
+                json={"user": user_key, "passphrase": passphrase, "blobId": blob_id},
+            )
+            resp.raise_for_status()
+            body = resp.json()
+            result["ok"] = bool(body.get("ok", False))
+            if result["ok"]:
+                result["data_base64"] = str(body.get("dataBase64", ""))
+            else:
+                result["locked"] = bool(body.get("locked", False))
+                result["note"] = str(body.get("error") or "The file could not be read.")
+    except Exception as exc:  # noqa: BLE001
         result["note"] = f"Could not reach the memory service: {exc}"
     return result
 

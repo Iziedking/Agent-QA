@@ -191,6 +191,25 @@
   .rec-note { font-family: var(--mono); font-size: 12px; color: var(--faint); margin-top: 8px; }
   .rec-note.warn { color: var(--bad); }
 
+  /* files */
+  .filebar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 4px; }
+  .fbtn { font-family: var(--sans); font-weight: 600; font-size: 12px; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--ink); background: var(--text); border: none;
+    padding: 10px 16px; cursor: pointer; transition: background .18s; display: inline-flex; align-items: center; }
+  .fbtn:hover { background: #fff; }
+  .fbtn.ghost { color: var(--dim); background: var(--inset); border: 1px solid var(--line); }
+  .fbtn.ghost:hover { color: var(--accent); border-color: var(--accent-dim); background: var(--inset); }
+  .filelist li { grid-template-columns: 1fr auto; align-items: center; }
+  .filelist li::before { content: none; }
+  .filelist .fmeta { min-width: 0; }
+  .filelist .fname { color: var(--text); word-break: break-all; }
+  .filelist .fsize { color: var(--faint); font-size: 11px; margin-top: 2px; }
+  .filelist .fget { font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--dim); background: var(--ink); border: 1px solid var(--line); padding: 7px 12px; cursor: pointer;
+    white-space: nowrap; margin-left: 12px; }
+  .filelist .fget:hover:not(:disabled) { color: var(--accent); border-color: var(--accent-dim); }
+  .filelist .fget:disabled { opacity: .5; cursor: progress; }
+
   /* progress strip while a write seals to Walrus */
   .scan { display: none; margin-top: 14px; border: 1px solid var(--line); background: var(--panel); padding: 14px; }
   .scan.on { display: block; }
@@ -494,6 +513,32 @@
         </div>
         <div class="error" id="error" role="alert">
           <b>Memory fault</b><span id="errorMsg"></span>
+        </div>
+      </section>
+
+      <section>
+        <div class="sec-label">Files</div>
+        <div class="sec-desc">
+          Store real files, encrypted under your passphrase, on Walrus, and pull them back on
+          any machine. Add a single file, or a whole folder (zipped in your browser first). Uses
+          the identity and folder above.
+        </div>
+        <div class="pane ticks">
+          <div class="pane-hd"><span class="t">Files</span><span class="h">encrypt · walrus · fetch</span></div>
+          <div class="pane-bd">
+            <div class="filebar">
+              <label class="fbtn">Add file<input id="fileInput" type="file" hidden /></label>
+              <label class="fbtn">Add folder (zipped)<input id="folderInput" type="file" webkitdirectory hidden /></label>
+              <button class="fbtn ghost" id="filesRefresh" type="button">Refresh</button>
+            </div>
+            <div class="scan" id="fileScan" aria-live="polite">
+              <div class="hd"><span id="fileStep" class="blink">encrypting</span><span>WALRUS</span></div>
+              <pre class="stream" id="fileStream"></pre>
+              <div class="bar"></div>
+            </div>
+            <ol class="records filelist" id="fileList"></ol>
+            <div class="rec-note" id="fileNote" style="display:none"></div>
+          </div>
         </div>
       </section>
 
@@ -1072,6 +1117,192 @@ args = ["-y", "agent-memory-connect"]</pre>
   }
   recBtn.addEventListener("click", doRecall);
   recQuery.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); doRecall(); } });
+
+  /* ---- files: encrypt, store on Walrus, list, download ---- */
+  var fileInput = $("fileInput"), folderInput = $("folderInput"), filesRefresh = $("filesRefresh");
+  var fileList = $("fileList"), fileNote = $("fileNote"), fileScan = $("fileScan"),
+      fileStep = $("fileStep"), fileStream = $("fileStream");
+
+  // A minimal store-only zip writer (no compression), so a picked folder becomes
+  // one blob with no external library. Enough to bundle a folder and unzip it
+  // anywhere with any standard tool.
+  var CRC_TABLE = (function () {
+    var t = new Uint32Array(256);
+    for (var n = 0; n < 256; n++) {
+      var c = n;
+      for (var k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+      t[n] = c >>> 0;
+    }
+    return t;
+  })();
+  function crc32(bytes) {
+    var c = 0xFFFFFFFF;
+    for (var i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
+    return (c ^ 0xFFFFFFFF) >>> 0;
+  }
+  function buildZip(entries) {
+    var enc = new TextEncoder();
+    var parts = [], central = [], offset = 0;
+    function u16(v) { return [v & 0xFF, (v >>> 8) & 0xFF]; }
+    function u32(v) { return [v & 0xFF, (v >>> 8) & 0xFF, (v >>> 16) & 0xFF, (v >>> 24) & 0xFF]; }
+    entries.forEach(function (e) {
+      var nameB = enc.encode(e.name), data = e.data, crc = crc32(data);
+      var local = [].concat(u32(0x04034b50), u16(20), u16(0), u16(0), u16(0), u16(0),
+        u32(crc), u32(data.length), u32(data.length), u16(nameB.length), u16(0));
+      var lb = new Uint8Array(local.length + nameB.length + data.length);
+      lb.set(local, 0); lb.set(nameB, local.length); lb.set(data, local.length + nameB.length);
+      parts.push(lb);
+      var cen = [].concat(u32(0x02014b50), u16(20), u16(20), u16(0), u16(0), u16(0), u16(0),
+        u32(crc), u32(data.length), u32(data.length), u16(nameB.length), u16(0), u16(0), u16(0), u16(0), u32(0), u32(offset));
+      var cb = new Uint8Array(cen.length + nameB.length);
+      cb.set(cen, 0); cb.set(nameB, cen.length);
+      central.push(cb);
+      offset += lb.length;
+    });
+    var cenSize = central.reduce(function (n, c) { return n + c.length; }, 0);
+    var end = new Uint8Array([].concat(u32(0x06054b50), u16(0), u16(0),
+      u16(entries.length), u16(entries.length), u32(cenSize), u32(offset), u16(0)));
+    var total = offset + cenSize + end.length, out = new Uint8Array(total), p = 0;
+    parts.forEach(function (b) { out.set(b, p); p += b.length; });
+    central.forEach(function (b) { out.set(b, p); p += b.length; });
+    out.set(end, p);
+    return out;
+  }
+
+  function readBytes(file) {
+    return new Promise(function (resolve, reject) {
+      var r = new FileReader();
+      r.onload = function () { resolve(new Uint8Array(r.result)); };
+      r.onerror = function () { reject(r.error || new Error("could not read the file")); };
+      r.readAsArrayBuffer(file);
+    });
+  }
+  function bytesToB64(bytes) {
+    var bin = "", CH = 0x8000;
+    for (var i = 0; i < bytes.length; i += CH) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CH));
+    return btoa(bin);
+  }
+  function b64ToBytes(b64) {
+    var bin = atob(b64), out = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+  function humanSize(n) {
+    if (n < 1024) return n + " B";
+    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+    return (n / 1024 / 1024).toFixed(1) + " MB";
+  }
+
+  var FILE_STEPS = ["encrypting under your passphrase", "sealing to walrus", "confirming"];
+  var fileTimers = [];
+  function startFileScan() {
+    fileScan.classList.add("on");
+    var i = 0; fileStep.textContent = FILE_STEPS[0];
+    fileTimers.push(setInterval(function () { i = (i + 1) % FILE_STEPS.length; fileStep.textContent = FILE_STEPS[i]; }, 1500));
+    if (!reduceMotion) {
+      var lines = [];
+      fileTimers.push(setInterval(function () {
+        var s = ""; for (var j = 0; j < 58; j++) s += HEX[(Math.random() * 16) | 0];
+        lines.push(s.replace(/(.{2})/g, "$1 ").trim()); if (lines.length > 4) lines.shift();
+        fileStream.textContent = lines.join("\n");
+      }, 110));
+    }
+  }
+  function stopFileScan() { fileScan.classList.remove("on"); fileTimers.forEach(clearInterval); fileTimers = []; }
+
+  var fileBusy = false;
+  function uploadBytes(name, bytes, contentType) {
+    if (fileBusy) return;
+    clearFail();
+    var id = identity(); if (!id) return;
+    if (bytes.length > 12 * 1024 * 1024) { fail("That file is over the 12 MB limit for the demo. Zip a smaller selection."); return; }
+    fileBusy = true; setStatus("storing file", false); startFileScan();
+    postJson("/file/upload", {
+      user_key: id.user, passphrase: id.pass, folder: id.folder,
+      name: name, content_type: contentType || "application/octet-stream", data_base64: bytesToB64(bytes),
+    }, 180000).then(function (r) {
+      stopFileScan();
+      if (r.ok && r.body && r.body.ok) {
+        setStatus("file stored", false);
+        fileNote.className = "rec-note"; fileNote.textContent = "Stored " + name + " on Walrus. Receipt " + (r.body.receipt || r.body.blob_id || "");
+        fileNote.style.display = "block";
+        refreshFiles();
+      } else {
+        setStatus("fault", true);
+        var reason = (r.body && (r.body.note || r.body.error)) || ("The service returned an error (HTTP " + r.status + ").");
+        fail("File not stored. " + reason);
+      }
+    }).catch(function (err) {
+      stopFileScan();
+      fail(err.name === "AbortError" ? "The upload timed out before Walrus confirmed it." : "Could not reach the memory service. " + err.message);
+    }).then(function () { fileBusy = false; });
+  }
+
+  function refreshFiles() {
+    var id = identity(); if (!id) return;
+    fileList.innerHTML = ""; fileNote.style.display = "none";
+    setStatus("listing files", false);
+    postJson("/file/list", { user_key: id.user, passphrase: id.pass, folder: id.folder }, 45000).then(function (r) {
+      if (!r.ok || !r.body) { setStatus("fault", true); return fail("The service returned an error (HTTP " + r.status + ")."); }
+      var files = r.body.files || [];
+      setStatus(files.length ? "files " + files.length : "no files yet", false);
+      files.forEach(function (f) {
+        var li = el("li");
+        var meta = el("div", "fmeta");
+        meta.appendChild(el("div", "fname", f.name || "(unnamed)"));
+        meta.appendChild(el("div", "fsize", humanSize(f.size || 0)));
+        li.appendChild(meta);
+        var btn = el("button", "fget", "download"); btn.type = "button";
+        btn.addEventListener("click", function () { downloadEntry(f, btn); });
+        li.appendChild(btn);
+        fileList.appendChild(li);
+      });
+      if (!files.length) {
+        fileNote.className = "rec-note";
+        fileNote.textContent = r.body.locked
+          ? "This folder holds files, but this passphrase opens none of them."
+          : "No files in this folder yet. Add one above.";
+        fileNote.style.display = "block";
+      }
+    }).catch(function (err) { fail("Could not reach the memory service. " + err.message); });
+  }
+
+  function downloadEntry(f, btn) {
+    var id = identity(); if (!id) return;
+    btn.disabled = true; btn.textContent = "fetching";
+    postJson("/file/download", { user_key: id.user, passphrase: id.pass, blob_id: f.blobId }, 180000).then(function (r) {
+      if (r.ok && r.body && r.body.ok) {
+        var bytes = b64ToBytes(r.body.data_base64 || "");
+        var blob = new Blob([bytes], { type: f.contentType || "application/octet-stream" });
+        var a = document.createElement("a");
+        a.href = URL.createObjectURL(blob); a.download = f.name || "download";
+        document.body.appendChild(a); a.click();
+        setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+      } else {
+        fail((r.body && (r.body.note || r.body.error)) || "Could not download the file.");
+      }
+    }).catch(function (err) {
+      fail(err.name === "AbortError" ? "The download timed out." : "Could not reach the memory service. " + err.message);
+    }).then(function () { btn.disabled = false; btn.textContent = "download"; });
+  }
+
+  fileInput.addEventListener("change", function () {
+    var f = fileInput.files && fileInput.files[0]; if (!f) return;
+    readBytes(f).then(function (bytes) { uploadBytes(f.name, bytes, f.type); });
+    fileInput.value = "";
+  });
+  folderInput.addEventListener("change", function () {
+    var files = Array.prototype.slice.call(folderInput.files || []); if (!files.length) return;
+    var root = (files[0].webkitRelativePath || files[0].name).split("/")[0] || "folder";
+    Promise.all(files.map(function (f) {
+      return readBytes(f).then(function (b) { return { name: f.webkitRelativePath || f.name, data: b }; });
+    })).then(function (entries) {
+      var zip = buildZip(entries);
+      uploadBytes(root + ".zip", zip, "application/zip");
+    }).catch(function (err) { fail("Could not read the folder. " + err.message); });
+    folderInput.value = "";
+  });
+  filesRefresh.addEventListener("click", refreshFiles);
 
   /* ---- docs modal ---- */
   var overlay = $("docsOverlay");
