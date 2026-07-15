@@ -121,6 +121,10 @@ app = FastAPI(
     description="A private, portable memory for agents, on Walrus.",
     version=core_version,
     lifespan=mcp_app.lifespan,
+    # Free up /docs for the product documentation page; the OpenAPI schema
+    # stays at /openapi.json for anyone who wants it.
+    docs_url=None,
+    redoc_url=None,
 )
 
 # Guard the request body before it is buffered or parsed.
@@ -162,7 +166,17 @@ class HealthResponse(BaseModel):
 
 @app.get("/", include_in_schema=False)
 async def index() -> FileResponse:
-    """Serve the browser-facing demo UI."""
+    """Serve the browser-facing console UI."""
+    return FileResponse(WEB_DIR / "index.html")
+
+
+@app.get("/docs", include_in_schema=False)
+async def docs() -> FileResponse:
+    """Serve the same page as ``/``; the client opens the docs panel on this path.
+
+    This makes ``agentsqa.xyz/docs`` a stable, shareable link straight into the
+    documentation.
+    """
     return FileResponse(WEB_DIR / "index.html")
 
 

@@ -1119,11 +1119,13 @@ args = ["-y", "agent-memory-connect"]</pre>
 
     // The boot gate plays once per browser session, not on every load, so a
     // refresh keeps you on the console instead of replaying the whole sequence.
-    // Reduced motion always skips it; "?intro" forces it for a demo.
+    // Reduced motion always skips it; "?intro" forces it for a demo. Landing on
+    // /docs skips straight to the console so the docs panel can open on top.
     var forceIntro = /[?&]intro\b/.test(location.search);
+    var wantDocs = /^\/docs\/?$/.test(location.pathname);
     var seenIntro = false;
     try { seenIntro = sessionStorage.getItem("aqa_intro_seen") === "1"; } catch (e) {}
-    if (reduceMotion || (seenIntro && !forceIntro)) {
+    if (reduceMotion || wantDocs || (seenIntro && !forceIntro)) {
       if (intro) intro.remove();
       return;
     }
@@ -1232,6 +1234,11 @@ args = ["-y", "agent-memory-connect"]</pre>
     skipBtn.addEventListener("click", finish);
     setPhase("gate");
   })();
+
+  // A shareable deep link: agentsqa.xyz/docs lands with the docs panel open.
+  if (/^\/docs\/?$/.test(location.pathname)) {
+    try { openDocs(); } catch (e) {}
+  }
 })();
 </script>
 </body>
