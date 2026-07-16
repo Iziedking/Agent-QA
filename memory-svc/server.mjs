@@ -20,6 +20,7 @@ import { scryptSync, randomBytes, createCipheriv, createDecipheriv, createHash }
 import { MemWal } from "@mysten-incubation/memwal";
 import { ensure as ensureWalrus } from "./walrus-files.mjs";
 import { ensure as ensureZeroG } from "./zerog-files.mjs";
+import { appendItem as localAppend, readItems as localRead } from "./localstore.mjs";
 
 const PORT = Number(process.env.MEMORY_SVC_PORT || 4000);
 const HOST = process.env.MEMORY_SVC_HOST || "0.0.0.0";
@@ -246,26 +247,46 @@ async function generationOf(user, folder) {
 // --- relayer access ---------------------------------------------------------
 
 // Store one encrypted item and wait for the relayer to confirm it reached
-// Walrus. Returns the receipt; throws with the reason when the write fails.
+// Walrus. If the relayer write fails (e.g. its upload pause), fall back to the
+// local encrypted store so the write still succeeds, and return a local
+// receipt. The item is the same opaque ciphertext either way.
 async function storeConfirmed(namespace, blob) {
-  return client.rememberAndWait(blob, namespace, { timeoutMs: REMEMBER_TIMEOUT_MS });
+  try {
+    return await client.rememberAndWait(blob, namespace, { timeoutMs: REMEMBER_TIMEOUT_MS });
+  } catch (e) {
+    try {
+      localAppend(namespace, blob);
+      const digest = createHash("sha256").update(blob).digest("hex").slice(0, 16);
+      return { blob_id: "local:" + digest, local: true };
+    } catch (le) {
+      // Both the relayer and the local store failed; surface the relayer error.
+      throw e;
+    }
+  }
 }
 
-// Pull a folder's raw items with a couple of retries: the relayer occasionally
-// drops a request, and a stalled lookup must never sink a live answer. Returns
-// { blobs, total } where total is the relayer's count for the namespace.
+// Pull a folder's raw items: query the relayer (with retries) and always merge
+// in anything the local fallback holds for this namespace, so items written
+// during a relayer outage are visible alongside relayer-stored ones. Returns
+// { blobs, total }. Never throws on a relayer read failure; local still applies.
 async function pullFolder(namespace, query, limit) {
-  let lastErr;
+  let memBlobs = [];
+  let memTotal = 0;
   for (let attempt = 0; attempt < RECALL_ATTEMPTS; attempt++) {
     try {
       const r = await client.recall({ query, limit, namespace });
-      const blobs = (r.results ?? []).map((x) => x.text).filter(Boolean);
-      return { blobs, total: Number(r.total ?? blobs.length) };
-    } catch (e) {
-      lastErr = e;
+      memBlobs = (r.results ?? []).map((x) => x.text).filter(Boolean);
+      memTotal = Number(r.total ?? memBlobs.length);
+      break;
+    } catch {
+      // retry; on the last attempt fall through to local-only
     }
   }
-  throw lastErr ?? new Error("recall failed");
+  const local = localRead(namespace);
+  if (!local.length) return { blobs: memBlobs, total: memTotal };
+  const seen = new Set(memBlobs);
+  const merged = memBlobs.concat(local.filter((b) => !seen.has(b)));
+  return { blobs: merged, total: memTotal + local.length };
 }
 
 // --- http -------------------------------------------------------------------

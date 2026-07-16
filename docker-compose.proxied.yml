@@ -49,8 +49,14 @@ services:
       - ZERO_G_PRIVATE_KEY=${ZERO_G_PRIVATE_KEY:-}
     mem_limit: 512m
     cpus: 0.5
+    # Persist the local encrypted fallback store (used when the relayer is down).
+    volumes:
+      - agentqa_memdata:/svc/data
     networks:
       - internal
+
+volumes:
+  agentqa_memdata:
 
 networks:
   # The existing ingress Caddy's network (arcrun-caddy is attached to this).

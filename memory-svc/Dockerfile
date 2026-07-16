@@ -14,10 +14,14 @@ RUN npm ci --omit=dev
 
 # Copy every source module, not just the entrypoint, or an import of a sibling
 # file crash-loops the container.
-COPY server.mjs walrus-files.mjs zerog-files.mjs ./
+COPY server.mjs walrus-files.mjs zerog-files.mjs localstore.mjs ./
 
-# Run as a non-root user.
-RUN useradd --create-home --uid 10002 svcuser
+# Local fallback store lives here; mount a volume at this path to persist it.
+ENV AGENT_MEMORY_DATA_DIR=/svc/data
+
+# Run as a non-root user, owning the data directory it writes to.
+RUN useradd --create-home --uid 10002 svcuser \
+    && mkdir -p /svc/data && chown -R svcuser:svcuser /svc/data
 USER svcuser
 
 EXPOSE 4000
