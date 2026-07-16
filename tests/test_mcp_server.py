@@ -10,7 +10,7 @@ import pytest
 import mcp_server.server as srv
 from core.description_checks import score_tool_description
 from core.schema_checks import check_tool_schema
-from mcp_server.server import forget, mcp, recall, remember
+from mcp_server.server import fetch_file, forget, list_files, mcp, recall, remember
 
 
 def _identity(monkeypatch, user="ada@example.com", passphrase="s3cret"):
@@ -162,11 +162,60 @@ async def test_tools_require_configured_identity(monkeypatch):
     assert f["forgotten"] is False and "X-Memory-User" in f["note"]
 
 
+async def test_list_files_tool(monkeypatch):
+    _identity(monkeypatch)
+
+    async def fake_list(user_key, passphrase, folder=""):
+        return {"enabled": True, "locked": False, "files": [
+            {"name": "a.zip", "size": 1024, "blobId": "walrus:b1", "contentType": "application/zip"},
+        ]}
+
+    monkeypatch.setattr(srv, "list_files_memory", fake_list)
+    out = await list_files("project-x")
+    assert out["memory_enabled"] is True
+    assert out["files"] == [{"name": "a.zip", "size": 1024, "content_type": "application/zip"}]
+    assert "1 file" in out["note"]
+
+
+async def test_fetch_file_tool_returns_bytes(monkeypatch):
+    _identity(monkeypatch)
+
+    async def fake_list(user_key, passphrase, folder=""):
+        return {"enabled": True, "files": [{"name": "a.txt", "size": 3, "blobId": "walrus:b1"}]}
+
+    async def fake_download(user_key, passphrase, blob_id):
+        assert blob_id == "walrus:b1"
+        return {"ok": True, "data_base64": "QUJD"}
+
+    monkeypatch.setattr(srv, "list_files_memory", fake_list)
+    monkeypatch.setattr(srv, "download_file_memory", fake_download)
+    out = await fetch_file("a.txt", "project-x")
+    assert out["ok"] is True and out["data_base64"] == "QUJD" and out["name"] == "a.txt"
+
+
+async def test_fetch_file_tool_missing_name(monkeypatch):
+    _identity(monkeypatch)
+
+    async def fake_list(user_key, passphrase, folder=""):
+        return {"enabled": True, "files": []}
+
+    monkeypatch.setattr(srv, "list_files_memory", fake_list)
+    out = await fetch_file("nope.zip")
+    assert out["ok"] is False and "No file named" in out["note"]
+
+
+async def test_file_tools_require_identity(monkeypatch):
+    monkeypatch.setattr(srv, "_get_identity", lambda: ("", ""))
+    lf = await list_files()
+    assert lf["memory_enabled"] is False and "X-Memory-User" in lf["note"]
+    ff = await fetch_file("a.zip")
+    assert ff["ok"] is False and "X-Memory-User" in ff["note"]
+
+
 async def test_tools_are_registered():
     tools = await mcp.get_tools()
-    assert "remember" in tools
-    assert "recall" in tools
-    assert "forget" in tools
+    for name in ("remember", "recall", "forget", "list_files", "fetch_file"):
+        assert name in tools
 
 
 async def _tool_as_dict(name):
@@ -179,14 +228,14 @@ async def _tool_as_dict(name):
     }
 
 
-@pytest.mark.parametrize("name", ["remember", "recall", "forget"])
+@pytest.mark.parametrize("name", ["remember", "recall", "forget", "list_files", "fetch_file"])
 async def test_own_tools_pass_description_check(name):
     tool = await _tool_as_dict(name)
     result = score_tool_description(tool)
     assert result.passed, f"tool {name} failed its own description check: {result.note}"
 
 
-@pytest.mark.parametrize("name", ["remember", "recall", "forget"])
+@pytest.mark.parametrize("name", ["remember", "recall", "forget", "list_files", "fetch_file"])
 async def test_own_tools_pass_schema_check(name):
     tool = await _tool_as_dict(name)
     result = check_tool_schema(tool)

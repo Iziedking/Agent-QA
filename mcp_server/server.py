@@ -21,7 +21,9 @@ from fastmcp import FastMCP
 from fastmcp.server.dependencies import get_http_headers
 from pydantic import Field
 
+from core.agent_memory import download_file as download_file_memory
 from core.agent_memory import forget as forget_memory
+from core.agent_memory import list_files as list_files_memory
 from core.agent_memory import recall as recall_memory
 from core.agent_memory import remember as remember_memory
 
@@ -45,7 +47,10 @@ mcp = FastMCP(
         "Use one folder per project or task, the same name every session. Write "
         "every note so a stranger could act on it alone: start with today's date, "
         "name concrete things (files, commands, amounts, addresses), and state why, "
-        "not just what."
+        "not just what.\n\n"
+        "Files are separate from notes. recall never returns files. To work with "
+        "the user's stored files, use list_files to see what is in a folder and "
+        "fetch_file to retrieve one by name."
     ),
 )
 
@@ -218,11 +223,107 @@ async def forget(
     return out
 
 
+async def list_files(
+    folder: Annotated[
+        str,
+        Field(
+            description=(
+                "The folder to list files from: the project or task's folder name. "
+                "Leave empty for the default space. Files are separate from notes, "
+                "so recall does not find them; use this to see stored files."
+            )
+        ),
+    ] = "",
+) -> dict[str, Any]:
+    """List the files the user has stored in a folder (name and size).
+
+    Files are stored separately from notes, so ``recall`` never returns them.
+    Call this to see which files exist, then ``fetch_file`` to retrieve one.
+    Returns each file's ``name`` and ``size``. An empty list means no files in
+    that folder yet; ``locked`` true means the passphrase does not open them.
+    """
+    user_key, passphrase = _get_identity()
+    if not user_key or not passphrase:
+        return {"files": [], "memory_enabled": False, "note": _CONFIGURE}
+    result = await list_files_memory(user_key, passphrase, folder)
+    files = [
+        {"name": f.get("name"), "size": f.get("size"), "content_type": f.get("contentType")}
+        for f in result.get("files", [])
+    ]
+    if not result["enabled"]:
+        note = "Memory is not configured on the server, so files cannot be listed."
+    elif result.get("locked"):
+        note = "This folder holds files, but the configured passphrase opens none of them."
+    elif files:
+        note = f"{len(files)} file(s) in this folder. Use fetch_file with a name to retrieve one."
+    else:
+        note = "No files stored in this folder yet."
+    return {"files": files, "memory_enabled": result["enabled"], "locked": bool(result.get("locked", False)), "note": note}
+
+
+# A fetched file is returned as base64 for the agent to decode and save. Cap the
+# inline size so a huge blob does not flood the model's context; larger files
+# should be pulled from the web console or the REST API instead.
+_FETCH_MAX_BYTES = int(os.environ.get("AGENT_MEMORY_MCP_FETCH_MAX_BYTES", str(3 * 1024 * 1024)))
+
+
+async def fetch_file(
+    name: Annotated[
+        str,
+        Field(description="The exact file name to retrieve, as shown by list_files."),
+    ],
+    folder: Annotated[
+        str,
+        Field(description="The folder the file is in. Leave empty for the default space."),
+    ] = "",
+) -> dict[str, Any]:
+    """Retrieve one of the user's stored files, decrypted, by name.
+
+    Files live separately from notes. Call ``list_files`` first to find the name.
+    Returns the file's bytes as base64 in ``data_base64`` along with its
+    ``name`` and ``content_type``; to save it, decode the base64 and write the
+    bytes to disk (for example ``echo <data_base64> | base64 -d > <name>``).
+    Very large files are not inlined; retrieve those from the web console or the
+    REST /file/download endpoint instead.
+    """
+    user_key, passphrase = _get_identity()
+    if not user_key or not passphrase:
+        return {"ok": False, "memory_enabled": False, "note": _CONFIGURE}
+    listing = await list_files_memory(user_key, passphrase, folder)
+    match = next((f for f in listing.get("files", []) if f.get("name") == name), None)
+    if not match:
+        if listing.get("locked"):
+            return {"ok": False, "note": "The passphrase does not open this folder's files."}
+        return {"ok": False, "note": f"No file named {name!r} in that folder. Use list_files to see the exact names."}
+    size = int(match.get("size") or 0)
+    if size > _FETCH_MAX_BYTES:
+        return {
+            "ok": False, "name": name, "size": size,
+            "note": (
+                f"{name} is {size} bytes, too large to return inline. Download it from the "
+                "web console at agentsqa.xyz or via the REST /file/download endpoint."
+            ),
+        }
+    result = await download_file_memory(user_key, passphrase, str(match.get("blobId", "")))
+    if not result.get("ok"):
+        return {"ok": False, "name": name, "note": result.get("note") or "The file could not be retrieved."}
+    return {
+        "ok": True,
+        "name": name,
+        "content_type": match.get("contentType"),
+        "size": size,
+        "data_base64": result.get("data_base64", ""),
+        "note": "Decode data_base64 and write the bytes to disk to save the file.",
+    }
+
+
 # Register the tools while keeping the functions plain callables, so they can be
 # unit tested directly without going through the transport.
 mcp.tool(remember)
 mcp.tool(recall)
 mcp.tool(forget)
+mcp.tool(list_files)
+mcp.tool(fetch_file)
 
 
 def run() -> None:
