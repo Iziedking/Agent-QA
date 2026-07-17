@@ -50,6 +50,35 @@ services:
     volumes:
       - agentqa_memdata:/svc/data
 
+  pay:
+    build: ./pay
+    restart: unless-stopped
+    expose:
+      - "9100"
+    # Internal only, like the memory sidecar. Caddy routes /x402/* here and
+    # everything else straight to the app, so the free console never touches the
+    # paywall. This service forwards paid calls to the app at app:9090.
+    environment:
+      - APP_URL=http://app:9090
+      # OKX facilitator credentials, from the same gitignored .env as the rest.
+      # The service refuses to start without them rather than failing mid-payment.
+      - OKX_API_KEY=${OKX_API_KEY:-}
+      - OKX_SECRET_KEY=${OKX_SECRET_KEY:-}
+      - OKX_PASSPHRASE=${OKX_PASSPHRASE:-}
+      # X Layer testnet by default; set eip155:196 for mainnet. The address that
+      # receives payment has no default on purpose.
+      - X402_NETWORK=${X402_NETWORK:-eip155:1952}
+      - X402_PAY_TO=${X402_PAY_TO:-}
+      # Per-call prices. Left unset, the service uses the defaults in server.mjs.
+      - X402_PRICE_RECALL=${X402_PRICE_RECALL:-}
+      - X402_PRICE_REMEMBER=${X402_PRICE_REMEMBER:-}
+      - X402_PRICE_FILES=${X402_PRICE_FILES:-}
+      - X402_PRICE_FILE=${X402_PRICE_FILE:-}
+    mem_limit: 256m
+    cpus: 0.5
+    depends_on:
+      - app
+
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped

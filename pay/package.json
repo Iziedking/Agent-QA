@@ -1,0 +1,19 @@
+{
+  "name": "agent-qa-pay",
+  "version": "0.1.0",
+  "private": true,
+  "description": "x402 paid lane for the memory API: takes payment on X Layer through the OKX facilitator, then forwards the call to the app. Declares the identity parameters a buying agent must collect, so an agent that finds us on the OKX marketplace can pay and call without any prior setup.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "dependencies": {
+    "@okxweb3/x402-core": "^0.1.0",
+    "@okxweb3/x402-evm": "^0.2.1",
+    "@okxweb3/x402-express": "^0.1.1",
+    "express": "^4.21.2"
+  }
+}
