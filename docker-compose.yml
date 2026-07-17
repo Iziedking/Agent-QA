@@ -65,15 +65,13 @@ services:
       - OKX_API_KEY=${OKX_API_KEY:-}
       - OKX_SECRET_KEY=${OKX_SECRET_KEY:-}
       - OKX_PASSPHRASE=${OKX_PASSPHRASE:-}
-      # X Layer testnet by default; set eip155:196 for mainnet. The address that
-      # receives payment has no default on purpose.
-      - X402_NETWORK=${X402_NETWORK:-eip155:1952}
+      # X Layer mainnet, matching the fee denomination on the marketplace listing.
+      # Set eip155:1952 for testnet. The address that receives payment has no
+      # default on purpose.
+      - X402_NETWORK=${X402_NETWORK:-eip155:196}
       - X402_PAY_TO=${X402_PAY_TO:-}
-      # Per-call prices. Left unset, the service uses the defaults in server.mjs.
-      - X402_PRICE_RECALL=${X402_PRICE_RECALL:-}
-      - X402_PRICE_REMEMBER=${X402_PRICE_REMEMBER:-}
-      - X402_PRICE_FILES=${X402_PRICE_FILES:-}
-      - X402_PRICE_FILE=${X402_PRICE_FILE:-}
+      # Per-call price. Must match the fee on the marketplace listing.
+      - X402_PRICE=${X402_PRICE:-}
     mem_limit: 256m
     cpus: 0.5
     depends_on:
