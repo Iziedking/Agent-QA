@@ -8,8 +8,16 @@
 # Before bringing it up:
 #   1. Set `name:` under networks.edge to your ingress Caddy's network. Find it
 #      with `docker network ls` (it is the network your Caddy container is on).
-#   2. Put MEMWAL_PRIVATE_KEY and MEMWAL_ACCOUNT_ID in a gitignored .env here.
-#   3. Add the agentsqa.xyz site block to your ingress Caddyfile (see deploy.md).
+#   2. Put MEMWAL_PRIVATE_KEY and MEMWAL_ACCOUNT_ID in a gitignored .env here,
+#      plus OKX_API_KEY / OKX_SECRET_KEY / OKX_PASSPHRASE / X402_PAY_TO for the
+#      paid lane (see deploy.md).
+#   3. Add the agentsqa.xyz site block to your ingress Caddyfile (see deploy.md),
+#      routing /x402/* to agentqa-pay:9100 and everything else to agentqa-app:9090.
+#
+# This is the file that deploys agentsqa.xyz. `docker compose up -d` WITHOUT
+# `-f docker-compose.proxied.yml` picks up docker-compose.yml instead, which
+# ships its own Caddy, cannot bind ports 80/443 (the ingress owns them), and
+# recreates agentqa-app on the wrong network — which takes the site down.
 #
 # Bring up:  docker compose -f docker-compose.proxied.yml up -d --build
 
@@ -26,6 +34,36 @@ services:
       - memory
     mem_limit: 512m
     cpus: 1.0
+    networks:
+      - edge
+      - internal
+
+  pay:
+    build: ./pay
+    container_name: agentqa-pay
+    restart: unless-stopped
+    # The paid lane for OKX marketplace buyers. No published ports: the ingress
+    # Caddy reaches it at agentqa-pay:9100 on the shared edge network and routes
+    # /x402/* here, while everything else still goes to agentqa-app. It forwards
+    # the paid call to the app over the internal network, so the free console and
+    # the paid lane share one implementation of the memory.
+    environment:
+      - APP_URL=http://agentqa-app:9090
+      # OKX facilitator credentials. The service refuses to start without these
+      # rather than failing halfway through a buyer's payment.
+      - OKX_API_KEY=${OKX_API_KEY:-}
+      - OKX_SECRET_KEY=${OKX_SECRET_KEY:-}
+      - OKX_PASSPHRASE=${OKX_PASSPHRASE:-}
+      # X Layer mainnet, matching the fee denomination on the marketplace
+      # listing. The address that receives payment has no default on purpose.
+      - X402_NETWORK=${X402_NETWORK:-eip155:196}
+      - X402_PAY_TO=${X402_PAY_TO:-}
+      # Must match the fee on the listing.
+      - X402_PRICE=${X402_PRICE:-}
+    depends_on:
+      - app
+    mem_limit: 256m
+    cpus: 0.5
     networks:
       - edge
       - internal
