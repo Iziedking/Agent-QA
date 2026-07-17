@@ -90,6 +90,4 @@ Forget retires a folder permanently: no recall returns its notes again, and the 
 - Forgetting is revocation, not erasure, because immutable storage offers nothing stronger, and we say so. Key destruction is the only true delete.
 - The service in front is stateless. Point your agents at the hosted endpoint or run your own from the published compose files; the memory model does not change.
 
-## Self-hosting
 
-The stack is two containers: the app (console, REST API, and the MCP endpoint on one port) and a memory sidecar that encrypts and talks to Walrus. `docker-compose.yml` runs it with its own Caddy for HTTPS. `docker-compose.proxied.yml` runs it behind an ingress proxy you already have. The sidecar needs `MEMWAL_PRIVATE_KEY` and `MEMWAL_ACCOUNT_ID` in a gitignored `.env`.

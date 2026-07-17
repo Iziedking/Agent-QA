@@ -57,6 +57,7 @@ htmlcov/
 
 # Internal runbooks (ours, not the product's). The public docs live alongside.
 docs/demo.md
+docs/walrus_feedback.md
 deploy.md
 
 # ---- Editors / OS ----
