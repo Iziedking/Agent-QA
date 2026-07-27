@@ -254,6 +254,7 @@ async def recall_endpoint(request: RecallRequest) -> dict:
         "truncated": bool(recalled.get("truncated", False)),
         "retired": bool(recalled.get("retired", False)),
         "locked": bool(recalled.get("locked", False)),
+        "unreachable": bool(recalled.get("unreachable", False)),
     }
 
 

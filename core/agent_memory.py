@@ -73,7 +73,9 @@ async def recall(
     ``truncated`` is True when the folder holds more items than the sidecar
     could scan, so the caller knows the answer may be incomplete.
     """
-    result: dict[str, Any] = {"query": query, "enabled": False, "records": [], "truncated": False}
+    result: dict[str, Any] = {
+        "query": query, "enabled": False, "records": [], "truncated": False, "unreachable": False,
+    }
     if not MEMORY_SVC_URL or not user_key or not passphrase or not query:
         return result
     try:
@@ -93,8 +95,14 @@ async def recall(
             result["truncated"] = bool(body.get("truncated", False))
             result["retired"] = bool(body.get("retired", False))
             result["locked"] = bool(body.get("locked", False))
-    except Exception:  # noqa: BLE001 - a memory outage must not surface as an error
-        pass
+    except Exception as exc:  # noqa: BLE001 - a memory outage must not surface as an error
+        # An outage still degrades to "nothing recalled", but it is recorded as
+        # unreachable rather than left to read as "not configured". Those two
+        # look identical from ``enabled`` alone, and confusing an outage for a
+        # missing config sends the reader to the wrong fix (a timed-out sidecar
+        # was once diagnosed as absent credentials for exactly this reason).
+        result["unreachable"] = True
+        result["note"] = f"Could not reach the memory service: {exc}"
     return result
 
 

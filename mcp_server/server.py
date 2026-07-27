@@ -161,7 +161,14 @@ async def recall(
         return {"query": query, "records": [], "memory_enabled": False, "note": _CONFIGURE}
     result = await recall_memory(user_key, passphrase, query, folder)
     found = len(result["records"])
-    if not result["enabled"]:
+    if result.get("unreachable"):
+        note = (
+            "The memory service could not be reached, so nothing could be recalled. "
+            "This is an outage, not an empty memory and not a wrong passphrase: "
+            "nothing has been lost. Do not tell the user their memory is empty, and "
+            "do not overwrite anything on the assumption that it is."
+        )
+    elif not result["enabled"]:
         note = "Memory is not configured on the server, so nothing can be recalled yet."
     elif result.get("retired"):
         note = "This identity is retired on this server, so nothing can be recalled."
@@ -184,6 +191,7 @@ async def recall(
         "memory_enabled": result["enabled"],
         "truncated": bool(result.get("truncated", False)),
         "locked": bool(result.get("locked", False)),
+        "unreachable": bool(result.get("unreachable", False)),
         "note": note,
     }
 

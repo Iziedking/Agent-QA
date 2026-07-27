@@ -97,6 +97,22 @@ async def test_recall_tool_graceful_when_memory_off(monkeypatch):
     assert "not configured on the server" in out["note"]
 
 
+async def test_recall_tool_reports_an_outage_as_an_outage(monkeypatch):
+    # An unreachable memory service must never read to the agent as an empty
+    # memory: an agent that believes the memory is empty starts from zero and
+    # can overwrite a folder it simply could not read.
+    _identity(monkeypatch)
+
+    async def fake_recall(user_key, passphrase, query, folder=""):
+        return {"query": query, "enabled": False, "records": [], "unreachable": True}
+
+    monkeypatch.setattr(srv, "recall_memory", fake_recall)
+    out = await recall("anything")
+    assert out["unreachable"] is True
+    assert "could not be reached" in out["note"]
+    assert "not configured" not in out["note"]
+
+
 async def test_recall_tool_reports_retired_identity(monkeypatch):
     _identity(monkeypatch)
 

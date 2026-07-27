@@ -37,7 +37,14 @@ const FETCH_MAX = Number(process.env.AGENT_MEMORY_FETCH_MAX || 500);
 // Kept under the HTTP client's own remember timeout so the caller always gets
 // a definite answer from us rather than a transport timeout.
 const REMEMBER_TIMEOUT_MS = Number(process.env.AGENT_MEMORY_REMEMBER_TIMEOUT_MS || 45000);
-const RECALL_ATTEMPTS = 3;
+// A relayer read gets a hard deadline of its own, because a hung relayer does
+// not fail fast: the SDK sits on the socket for ~30s per call. Attempts times
+// timeout is the worst case a recall can cost, and it must stay under the HTTP
+// client's recall timeout (30s, core/agent_memory.py) or every call to a
+// degraded relayer times out at the transport and the local fallback is never
+// reached. 2 x 8s leaves room for the merge and the reply.
+const RECALL_ATTEMPTS = Number(process.env.AGENT_MEMORY_RECALL_ATTEMPTS || 2);
+const RECALL_ATTEMPT_MS = Number(process.env.AGENT_MEMORY_RECALL_ATTEMPT_MS || 8000);
 
 const SERVER_URL = process.env.MEMWAL_SERVER_URL || "https://relayer.memwal.ai";
 
@@ -265,6 +272,20 @@ async function storeConfirmed(namespace, blob) {
   }
 }
 
+// Race a relayer call against a deadline. The MemWal client puts no timeout of
+// its own on a read, so a hung relayer holds the request for as long as the
+// socket stays open (~30s observed, per attempt). The losing promise cannot be
+// cancelled, so it gets a no-op catch: a late rejection must not surface as an
+// unhandled rejection and take the process down.
+function withDeadline(promise, ms, what) {
+  let timer;
+  const deadline = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${what} timed out after ${ms}ms`)), ms);
+  });
+  promise.catch(() => {});
+  return Promise.race([promise, deadline]).finally(() => clearTimeout(timer));
+}
+
 // Pull a folder's raw items: query the relayer (with retries) and always merge
 // in anything the local fallback holds for this namespace, so items written
 // during a relayer outage are visible alongside relayer-stored ones. Returns
@@ -272,15 +293,32 @@ async function storeConfirmed(namespace, blob) {
 async function pullFolder(namespace, query, limit) {
   let memBlobs = [];
   let memTotal = 0;
+  let lastError = null;
   for (let attempt = 0; attempt < RECALL_ATTEMPTS; attempt++) {
     try {
-      const r = await client.recall({ query, limit, namespace });
+      const r = await withDeadline(
+        client.recall({ query, limit, namespace }),
+        RECALL_ATTEMPT_MS,
+        "relayer read"
+      );
       memBlobs = (r.results ?? []).map((x) => x.text).filter(Boolean);
       memTotal = Number(r.total ?? memBlobs.length);
+      lastError = null;
       break;
-    } catch {
+    } catch (e) {
       // retry; on the last attempt fall through to local-only
+      lastError = e;
     }
+  }
+  if (lastError) {
+    // Logged once per pull, not per attempt. Without this a relayer outage is
+    // invisible: recall still answers from the local store, so the only symptom
+    // is silence. Recall stays a success; this is the breadcrumb that explains
+    // why the answer holds only locally-stored items.
+    console.warn(
+      `agent-memory-svc: relayer read failed after ${RECALL_ATTEMPTS} attempt(s), ` +
+        `serving local store only: ${String(lastError?.message || lastError)}`
+    );
   }
   const local = localRead(namespace);
   if (!local.length) return { blobs: memBlobs, total: memTotal };

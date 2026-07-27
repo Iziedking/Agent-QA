@@ -1096,6 +1096,9 @@ args = ["-y", "agent-memory-connect"]</pre>
           if (r.body.locked) {
             recNote.className = "rec-note warn";
             recNote.textContent = "This folder holds notes, but this passphrase opens none of them. The memory is not empty; the passphrase is wrong.";
+          } else if (r.body.unreachable) {
+            recNote.className = "rec-note warn";
+            recNote.textContent = "The memory service could not be reached, so nothing could be read. This is an outage, not an empty folder. Nothing has been lost; try again shortly.";
           } else {
             recNote.className = "rec-note";
             recNote.textContent = r.body.memory_enabled === false

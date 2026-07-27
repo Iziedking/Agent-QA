@@ -133,10 +133,27 @@ async def test_recall_passes_truncation_through(monkeypatch):
 
 
 async def test_recall_graceful_when_down(monkeypatch):
+    # An outage degrades to "nothing recalled" without raising, but it is
+    # recorded as unreachable so the caller does not report an outage as an
+    # unconfigured server (or, worse, as an empty memory).
     monkeypatch.setattr(mem, "MEMORY_SVC_URL", "http://memory:4000")
     monkeypatch.setattr(mem.httpx, "AsyncClient", _factory(fail=True))
     out = await mem.recall("ada", "s3cret", "anything")
-    assert out == {"query": "anything", "enabled": False, "records": [], "truncated": False}
+    assert out["query"] == "anything"
+    assert out["enabled"] is False
+    assert out["records"] == []
+    assert out["truncated"] is False
+    assert out["unreachable"] is True
+    assert "Could not reach the memory service" in out["note"]
+
+
+async def test_recall_not_unreachable_when_sidecar_answers(monkeypatch):
+    # A configured-but-disabled sidecar is a different fault from an outage,
+    # and must not be labelled unreachable.
+    monkeypatch.setattr(mem, "MEMORY_SVC_URL", "http://memory:4000")
+    monkeypatch.setattr(mem.httpx, "AsyncClient", _factory(resp={"enabled": False, "records": []}))
+    out = await mem.recall("ada", "s3cret", "anything")
+    assert out["enabled"] is False and out["unreachable"] is False
 
 
 async def test_recall_disabled_without_url(monkeypatch):
