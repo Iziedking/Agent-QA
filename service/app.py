@@ -125,7 +125,15 @@ class MaxBodySizeMiddleware:
 # container serves the UI, the REST API, and the MCP endpoint under one domain.
 # The MCP app carries its own lifespan (it starts the session manager), which the
 # parent app must run, so we hand that lifespan to FastAPI.
-mcp_app = mcp_instance.http_app(path="/")
+# stateless_http gives every request its own transport, so the server keeps no
+# per-client session state. Without it, a redeploy drops the session table and
+# every already-connected agent starts failing with "Session not found" until a
+# human reconnects it — a memory that goes silent whenever we ship is worse than
+# one that is briefly slow. Nothing here needs a session: identity arrives in
+# the X-Memory-* headers on every call, and the tools are one-shot request and
+# response. The cost is server-initiated messages (progress, sampling) and
+# resumability, none of which this server uses.
+mcp_app = mcp_instance.http_app(path="/", stateless_http=True)
 
 app = FastAPI(
     title="Portable Agent Memory",

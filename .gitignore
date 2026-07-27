@@ -58,6 +58,9 @@ htmlcov/
 # Internal runbooks (ours, not the product's). The public docs live alongside.
 docs/demo.md
 docs/walrus_feedback.md
+# Research for the eventual move to Walrus mainnet, held until the wallet has
+# enough SUI and WAL to build against it.
+docs/walrus-direct.md
 deploy.md
 
 # ---- Editors / OS ----
