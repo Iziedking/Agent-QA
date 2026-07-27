@@ -20,7 +20,13 @@ import { scryptSync, randomBytes, createCipheriv, createDecipheriv, createHash }
 import { MemWal } from "@mysten-incubation/memwal";
 import { ensure as ensureWalrus } from "./walrus-files.mjs";
 import { ensure as ensureZeroG } from "./zerog-files.mjs";
-import { appendItem as localAppend, readItems as localRead } from "./localstore.mjs";
+import {
+  appendItem as localAppend,
+  readItems as localRead,
+  listNamespaces as localNamespaces,
+  removeItems as localRemove,
+  pendingCount as localPending,
+} from "./localstore.mjs";
 
 const PORT = Number(process.env.MEMORY_SVC_PORT || 4000);
 const HOST = process.env.MEMORY_SVC_HOST || "0.0.0.0";
@@ -45,6 +51,24 @@ const REMEMBER_TIMEOUT_MS = Number(process.env.AGENT_MEMORY_REMEMBER_TIMEOUT_MS 
 // reached. 2 x 8s leaves room for the merge and the reply.
 const RECALL_ATTEMPTS = Number(process.env.AGENT_MEMORY_RECALL_ATTEMPTS || 2);
 const RECALL_ATTEMPT_MS = Number(process.env.AGENT_MEMORY_RECALL_ATTEMPT_MS || 8000);
+// After a failed read, stop calling the relayer for this long and serve the
+// local store directly. Short enough that recovery is picked up within a
+// minute, long enough that no single request pays the timeout twice.
+const RELAYER_COOLDOWN_MS = Number(process.env.AGENT_MEMORY_RELAYER_COOLDOWN_MS || 60000);
+// Epoch ms until which the relayer is treated as down. 0 means "try it".
+let relayerDownUntil = 0;
+
+// Draining the local store back upstream. The local store is a buffer for an
+// outage, not a second home: without this, everything written while the relayer
+// was down stays local forever and the two copies quietly diverge.
+//
+// Spacing respects the managed relayer's published rate limits (60 points per
+// minute burst, remember costs 5, so 12 writes a minute is the ceiling). 6s
+// spacing sits under that with room for real traffic alongside the drain.
+const DRAIN_INTERVAL_MS = Number(process.env.AGENT_MEMORY_DRAIN_INTERVAL_MS || 300000);
+const DRAIN_BATCH = Number(process.env.AGENT_MEMORY_DRAIN_BATCH || 20);
+const DRAIN_SPACING_MS = Number(process.env.AGENT_MEMORY_DRAIN_SPACING_MS || 6000);
+let draining = false;
 
 const SERVER_URL = process.env.MEMWAL_SERVER_URL || "https://relayer.memwal.ai";
 
@@ -258,18 +282,38 @@ async function generationOf(user, folder) {
 // local encrypted store so the write still succeeds, and return a local
 // receipt. The item is the same opaque ciphertext either way.
 async function storeConfirmed(namespace, blob) {
+  // While the breaker is open the relayer is known to be failing, so a write
+  // would spend the full confirmation timeout only to fall back anyway. Go
+  // straight to local; the cooldown lets the next write try the relayer again,
+  // so recovery is picked up on its own.
+  if (Date.now() < relayerDownUntil) return storeLocal(namespace, blob);
   try {
-    return await client.rememberAndWait(blob, namespace, { timeoutMs: REMEMBER_TIMEOUT_MS });
+    const receipt = await client.rememberAndWait(blob, namespace, {
+      timeoutMs: REMEMBER_TIMEOUT_MS,
+    });
+    relayerDownUntil = 0;
+    return receipt;
   } catch (e) {
+    relayerDownUntil = Date.now() + RELAYER_COOLDOWN_MS;
+    console.warn(
+      `agent-memory-svc: relayer write failed, storing locally for the next ` +
+        `${Math.round(RELAYER_COOLDOWN_MS / 1000)}s: ${String(e?.message || e)}`
+    );
     try {
-      localAppend(namespace, blob);
-      const digest = createHash("sha256").update(blob).digest("hex").slice(0, 16);
-      return { blob_id: "local:" + digest, local: true };
-    } catch (le) {
+      return storeLocal(namespace, blob);
+    } catch {
       // Both the relayer and the local store failed; surface the relayer error.
       throw e;
     }
   }
+}
+
+// Append to the local encrypted store and hand back a receipt marked local, so
+// a caller can tell a locally-held write from a Walrus-confirmed one.
+function storeLocal(namespace, blob) {
+  localAppend(namespace, blob);
+  const digest = createHash("sha256").update(blob).digest("hex").slice(0, 16);
+  return { blob_id: "local:" + digest, local: true };
 }
 
 // Race a relayer call against a deadline. The MemWal client puts no timeout of
@@ -286,6 +330,73 @@ function withDeadline(promise, ms, what) {
   return Promise.race([promise, deadline]).finally(() => clearTimeout(timer));
 }
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Push locally-buffered items back to the relayer, oldest first, and forget the
+// local copy only once the relayer has confirmed each one. Confirmation is what
+// makes dropping the local copy safe: an unconfirmed write would lose the item.
+//
+// Stops at the first failure and leaves the rest for the next cycle, because a
+// relayer that just failed will almost certainly fail on the next item too, and
+// hammering it burns the rate limit that the real traffic needs. Never throws:
+// a drain problem must not take the sidecar down.
+async function drainLocal() {
+  if (!client || draining || Date.now() < relayerDownUntil) return;
+  draining = true;
+  let sent = 0;
+  try {
+    for (const namespace of localNamespaces()) {
+      const items = localRead(namespace);
+      if (!items.length) continue;
+      const done = [];
+      for (const item of items) {
+        if (sent >= DRAIN_BATCH) break;
+        try {
+          await client.rememberAndWait(item, namespace, { timeoutMs: REMEMBER_TIMEOUT_MS });
+          done.push(item);
+          sent++;
+        } catch (e) {
+          relayerDownUntil = Date.now() + RELAYER_COOLDOWN_MS;
+          console.warn(
+            `agent-memory-svc: drain paused, relayer rejected a buffered item: ` +
+              `${String(e?.message || e)}`
+          );
+          break;
+        }
+        await sleep(DRAIN_SPACING_MS);
+      }
+      if (done.length) {
+        localRemove(namespace, done);
+        console.log(
+          `agent-memory-svc: drained ${done.length} buffered item(s) upstream from ${namespace}`
+        );
+      }
+      if (Date.now() < relayerDownUntil || sent >= DRAIN_BATCH) break;
+    }
+    if (sent) {
+      console.log(
+        `agent-memory-svc: drain cycle done, ${sent} item(s) restored upstream, ` +
+          `${localPending()} still buffered`
+      );
+    }
+  } catch (e) {
+    console.warn(`agent-memory-svc: drain cycle failed: ${String(e?.message || e)}`);
+  } finally {
+    draining = false;
+  }
+}
+
+// Fold the local fallback store into whatever the relayer returned. Items
+// written while the relayer was down live only here, so this runs on every
+// path, including the one that skipped the relayer entirely.
+function mergeLocal(namespace, memBlobs, memTotal) {
+  const local = localRead(namespace);
+  if (!local.length) return { blobs: memBlobs, total: memTotal };
+  const seen = new Set(memBlobs);
+  const merged = memBlobs.concat(local.filter((b) => !seen.has(b)));
+  return { blobs: merged, total: memTotal + local.length };
+}
+
 // Pull a folder's raw items: query the relayer (with retries) and always merge
 // in anything the local fallback holds for this namespace, so items written
 // during a relayer outage are visible alongside relayer-stored ones. Returns
@@ -294,6 +405,15 @@ async function pullFolder(namespace, query, limit) {
   let memBlobs = [];
   let memTotal = 0;
   let lastError = null;
+  // One request can pull more than once (a recall looks up the folder's
+  // generation before reading its data), so a per-attempt deadline alone still
+  // multiplies: two pulls at the full budget overran the client timeout even
+  // after the deadline was added. The breaker makes the cost of a dead relayer
+  // per REQUEST, not per pull: the first failure opens it and every later pull
+  // goes straight to the local store until the cooldown expires.
+  if (Date.now() < relayerDownUntil) {
+    return mergeLocal(namespace, [], 0);
+  }
   for (let attempt = 0; attempt < RECALL_ATTEMPTS; attempt++) {
     try {
       const r = await withDeadline(
@@ -311,20 +431,20 @@ async function pullFolder(namespace, query, limit) {
     }
   }
   if (lastError) {
+    relayerDownUntil = Date.now() + RELAYER_COOLDOWN_MS;
     // Logged once per pull, not per attempt. Without this a relayer outage is
     // invisible: recall still answers from the local store, so the only symptom
     // is silence. Recall stays a success; this is the breadcrumb that explains
     // why the answer holds only locally-stored items.
     console.warn(
       `agent-memory-svc: relayer read failed after ${RECALL_ATTEMPTS} attempt(s), ` +
-        `serving local store only: ${String(lastError?.message || lastError)}`
+        `serving local store only for the next ${Math.round(RELAYER_COOLDOWN_MS / 1000)}s: ` +
+        `${String(lastError?.message || lastError)}`
     );
+  } else {
+    relayerDownUntil = 0;
   }
-  const local = localRead(namespace);
-  if (!local.length) return { blobs: memBlobs, total: memTotal };
-  const seen = new Set(memBlobs);
-  const merged = memBlobs.concat(local.filter((b) => !seen.has(b)));
-  return { blobs: merged, total: memTotal + local.length };
+  return mergeLocal(namespace, memBlobs, memTotal);
 }
 
 // --- http -------------------------------------------------------------------
@@ -357,7 +477,15 @@ const server = createServer(async (req, res) => {
     const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
 
     if (req.method === "GET" && url.pathname === "/health") {
-      return send(res, 200, { status: "ok", enabled: client !== null });
+      // buffered_local and relayer_down make an outage legible from outside:
+      // recall keeps answering from the buffer, so without these the only
+      // symptom of a dead relayer is a number that never goes down.
+      return send(res, 200, {
+        status: "ok",
+        enabled: client !== null,
+        relayer_down: Date.now() < relayerDownUntil,
+        buffered_local: localPending(),
+      });
     }
 
     // Remember one item, encrypted, in this user's folder. Replies only after
@@ -590,4 +718,15 @@ const server = createServer(async (req, res) => {
 server.listen(PORT, HOST, () => {
   const state = client ? "live" : "disabled (set MEMWAL_PRIVATE_KEY and MEMWAL_ACCOUNT_ID to enable)";
   console.log(`agent-memory-svc listening on http://${HOST}:${PORT} - memory ${state}, encrypted per user`);
+  if (client && DRAIN_INTERVAL_MS > 0) {
+    const pending = localPending();
+    if (pending) {
+      console.log(
+        `agent-memory-svc: ${pending} item(s) buffered locally, draining upstream every ` +
+          `${Math.round(DRAIN_INTERVAL_MS / 1000)}s once the relayer answers`
+      );
+    }
+    // unref so a pending drain timer never holds the process open on shutdown.
+    setInterval(drainLocal, DRAIN_INTERVAL_MS).unref();
+  }
 });

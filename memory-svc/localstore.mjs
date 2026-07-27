@@ -10,7 +10,9 @@
 // Append-only, one JSON-lines file per namespace, under a directory that should
 // be a mounted volume so it survives restarts (AGENT_MEMORY_DATA_DIR).
 
-import { mkdirSync, appendFileSync, readFileSync } from "node:fs";
+import {
+  mkdirSync, appendFileSync, readFileSync, readdirSync, writeFileSync, renameSync, unlinkSync,
+} from "node:fs";
 import { join } from "node:path";
 
 const DATA_DIR = process.env.AGENT_MEMORY_DATA_DIR || "./data";
@@ -33,6 +35,50 @@ function fileFor(namespace) {
 export function appendItem(namespace, item) {
   ensureDir();
   appendFileSync(fileFor(namespace), JSON.stringify(item) + "\n", "utf8");
+}
+
+// Every namespace holding local items. Namespaces are already safe tokens
+// (avow-<hex>), so the sanitize in fileFor is a no-op for real ones and the
+// file name maps back to the namespace unchanged.
+export function listNamespaces() {
+  try {
+    return readdirSync(DATA_DIR)
+      .filter((f) => f.endsWith(".jsonl"))
+      .map((f) => f.slice(0, -".jsonl".length));
+  } catch {
+    return [];
+  }
+}
+
+// Drop specific items from a namespace, used once they are confirmed upstream
+// so this store stays a buffer rather than a second copy of everything.
+//
+// Re-reads before rewriting, so items appended while a drain was in flight are
+// kept: only what was actually confirmed is removed. The rewrite goes to a temp
+// file and is renamed over the original, which is atomic on POSIX, so a crash
+// mid-write leaves the previous file intact rather than a truncated one.
+export function removeItems(namespace, items) {
+  const drop = new Set(items);
+  if (!drop.size) return 0;
+  const remaining = readItems(namespace).filter((i) => !drop.has(i));
+  const path = fileFor(namespace);
+  if (!remaining.length) {
+    try {
+      unlinkSync(path);
+    } catch {}
+    return drop.size;
+  }
+  const tmp = path + ".tmp";
+  writeFileSync(tmp, remaining.map((i) => JSON.stringify(i) + "\n").join(""), "utf8");
+  renameSync(tmp, path);
+  return drop.size;
+}
+
+// How many items are waiting to go upstream, across every namespace.
+export function pendingCount() {
+  let n = 0;
+  for (const ns of listNamespaces()) n += readItems(ns).length;
+  return n;
 }
 
 // Read every item stored under a namespace. Returns [] if none.
