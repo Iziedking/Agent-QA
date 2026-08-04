@@ -70,3 +70,7 @@ deploy.md
 *.swo
 .DS_Store
 Thumbs.db
+
+# Local ledger of OKX task ids this machine has paid for. Bookkeeping only,
+# but it is the only thing that stops --recover double-paying, so never share it.
+scripts/.okx-paid.jsonl

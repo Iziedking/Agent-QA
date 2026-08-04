@@ -30,7 +30,11 @@ import { createServer } from "node:http";
 import { scryptSync, randomBytes, createCipheriv, createDecipheriv, createHash } from "node:crypto";
 import { ensure as ensureWalrus } from "./walrus-files.mjs";
 import { ensure as ensureZeroG } from "./zerog-files.mjs";
-import { ensureClients as ensureWalrusClients, balances as walrusBalances } from "./walrus-client.mjs";
+import {
+  ensureClients as ensureWalrusClients,
+  balances as walrusBalances,
+  blobAvailable as walrusBlobAvailable,
+} from "./walrus-client.mjs";
 import {
   flush as flushQuilt,
   readQuilt,
@@ -242,17 +246,36 @@ async function anyFileBackendEnabled() {
   return (await ensureWalrus()).enabled || (await ensureZeroG()).enabled;
 }
 
-async function getBlobByRef(ref) {
-  let store = "walrus";
-  let id = ref;
-  const i = ref.indexOf(":");
+// Split a stored reference into its backend and id.
+function parseRef(ref) {
+  const i = String(ref).indexOf(":");
   if (i > 0) {
     const prefix = ref.slice(0, i);
-    if (prefix === "walrus" || prefix === "0g") { store = prefix; id = ref.slice(i + 1); }
+    if (prefix === "walrus" || prefix === "0g") return { store: prefix, id: ref.slice(i + 1) };
   }
+  return { store: "walrus", id: ref }; // a bare id is a legacy Walrus blob
+}
+
+async function getBlobByRef(ref) {
+  const { store, id } = parseRef(ref);
   const backend = store === "0g" ? await ensureZeroG() : await ensureWalrus();
   if (!backend.enabled) throw new Error(`${store} storage is not configured on this server`);
   return backend.getBlob(id);
+}
+
+// Can this reference still be fetched? true, false, or null for "cannot tell".
+//
+// Only Walrus can answer. 0G exposes no equivalent status check, so those come
+// back null rather than being guessed at, and null is reported as unknown, never
+// as missing.
+async function refAvailable(ref) {
+  const { store, id } = parseRef(ref);
+  if (store !== "walrus") return null;
+  try {
+    return await walrusBlobAvailable(id);
+  } catch {
+    return null;
+  }
 }
 
 function dataNamespaceOf(user, folder, generation) {
@@ -707,7 +730,31 @@ const server = createServer(async (req, res) => {
         } catch {}
       }
       files.sort((a, b) => (b.ts || 0) - (a.ts || 0));
-      return send(res, 200, { enabled: true, files, locked: blobs.length > 0 && scanned === 0 });
+
+      // Say which of these can actually still be fetched.
+      //
+      // The index is append-only and encrypted under the user's passphrase, so
+      // the server cannot prune it: it cannot read its own contents. What it
+      // can do is check each blob and be honest. Without this the index happily
+      // lists files that no longer exist anywhere, which is how 36 expired
+      // blobs sat there looking retrievable. `available: null` means the
+      // question could not be answered, and must not be read as "gone".
+      const checked = await Promise.all(
+        files.map(async (f) => ({ ...f, available: await refAvailable(f.blobId) }))
+      );
+      const expired = checked.filter((f) => f.available === false).length;
+      return send(res, 200, {
+        enabled: true,
+        files: checked,
+        expired,
+        // Surfaced so a caller does not have to count: an expired file is
+        // permanently unreadable and can only be restored by re-uploading it.
+        note: expired
+          ? `${expired} of ${checked.length} file(s) have expired on Walrus and can no longer be downloaded. ` +
+            `Re-upload them from a local copy if you still need them.`
+          : undefined,
+        locked: blobs.length > 0 && scanned === 0,
+      });
     }
 
     // Download a file: fetch its Walrus blob and decrypt it. Needs only the
@@ -727,6 +774,21 @@ const server = createServer(async (req, res) => {
         // Route to whichever backend the reference names (Walrus or 0G).
         enc = await getBlobByRef(blobId);
       } catch (e) {
+        // Distinguish expiry from every other read failure. A lapsed blob is
+        // gone for good and no amount of retrying helps, so saying so is worth
+        // more than passing back "BlobNotCertifiedError", which reads like a
+        // transient fault and invites a pointless retry loop.
+        const expired = (await refAvailable(blobId)) === false;
+        if (expired) {
+          return send(res, 200, {
+            ok: false,
+            expired: true,
+            error:
+              "This file's storage term on Walrus has ended, so the bytes are no longer " +
+              "retrievable. An expired blob cannot be extended or recovered, only " +
+              "re-uploaded from a copy you still hold.",
+          });
+        }
         return send(res, 200, { ok: false, error: `blob read failed: ${String(e?.message || e)}` });
       }
       try {

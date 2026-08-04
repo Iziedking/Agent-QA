@@ -88,4 +88,40 @@ async function balances() {
   return out;
 }
 
-export { ensureClients, balances, NETWORK, RPC, RELAY };
+// Is a blob still stored and certified on Walrus?
+//
+// This exists because expiry is silent and has already cost us data: 36 file
+// blobs written with a 5-epoch term all lapsed, and reading one now fails with
+// BlobNotCertifiedError. Nothing warned us, because the file index is encrypted
+// per user and the server cannot audit its own contents. The best it can do is
+// answer this question when asked.
+//
+// Returns true, false, or null when the answer cannot be determined (Walrus not
+// configured, or the status lookup itself failed). Null must not be shown as
+// "gone": an RPC hiccup is not proof a file is lost.
+const availability = new Map(); // blobId -> { ok, at }
+const AVAILABILITY_TTL_MS = Number(process.env.WALRUS_AVAILABILITY_TTL_MS || 600000);
+
+async function blobAvailable(blobId) {
+  const hit = availability.get(blobId);
+  // An expired blob never comes back, and a live one stays live for its term,
+  // so this can be cached hard. The TTL only exists so a transient failure is
+  // not remembered as a verdict.
+  if (hit && Date.now() - hit.at < AVAILABILITY_TTL_MS) return hit.ok;
+  const s = await ensureClients();
+  if (!s.enabled) return null;
+  let ok = null;
+  try {
+    ok = await (await s.walrus.getBlob({ blobId })).exists();
+  } catch (e) {
+    // A blob past its end epoch reports itself as not certified rather than as
+    // an error, so an actual throw here means the lookup failed, not that the
+    // blob is gone. The one exception is an explicit not-certified error.
+    const msg = String(e?.message || e);
+    ok = /NotCertified|not certified|BlobNotCertified/i.test(msg) ? false : null;
+  }
+  if (ok !== null) availability.set(blobId, { ok, at: Date.now() });
+  return ok;
+}
+
+export { ensureClients, balances, blobAvailable, NETWORK, RPC, RELAY };
