@@ -7,16 +7,20 @@ FROM node:20-slim
 ENV NODE_ENV=production
 WORKDIR /svc
 
-# Install dependencies first (the MemWal client and its Sui/Walrus deps), so
-# this layer caches until the manifest changes.
+# Install dependencies first (the Sui and Walrus SDKs), so this layer caches
+# until the manifest changes.
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
 # Copy every source module, not just the entrypoint, or an import of a sibling
-# file crash-loops the container.
-COPY server.mjs walrus-files.mjs zerog-files.mjs localstore.mjs ./
+# file crash-loops the container. This has taken production down once already,
+# so add the file here in the same commit that creates it.
+COPY server.mjs walrus-client.mjs walrus-notes.mjs walrus-files.mjs \
+     zerog-files.mjs localstore.mjs ./
 
-# Local fallback store lives here; mount a volume at this path to persist it.
+# The write-ahead buffer, the read cache, and the quilt index all live here.
+# This MUST be a mounted volume: without it a restart drops anything not yet
+# flushed to Walrus, and the cache has to be rebuilt from chain on every boot.
 ENV AGENT_MEMORY_DATA_DIR=/svc/data
 
 # Run as a non-root user, owning the data directory it writes to.

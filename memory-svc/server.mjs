@@ -1,31 +1,54 @@
 // Portable, private agent memory sidecar.
 //
 // Gives any agent a private memory on Walrus, organised as user -> folder ->
-// items, through the MemWal client. Every item is encrypted under a key derived
-// from the user's passphrase before it is stored, so at rest it is unreadable.
-// On recall, the sidecar pulls a folder's items, decrypts them transiently with
-// the passphrase supplied on that request, ranks them against the query, and
-// returns the best matches. The passphrase and the plaintext are never stored.
+// items. Every item is encrypted under a key derived from the user's passphrase
+// before it is stored, so at rest it is unreadable. On recall, the sidecar
+// gathers a folder's items, decrypts them transiently with the passphrase
+// supplied on that request, ranks them against the query, and returns the best
+// matches. The passphrase and the plaintext are never stored.
 //
-// Reliability contract: a remember reply of ok:true means the relayer confirmed
-// the write reached Walrus, and the reply carries the blob id as a receipt. A
-// failed or timed-out write reports ok:false with the reason, never a silent
-// success. A recall that could not scan the whole folder says so via truncated.
+// STORAGE SHAPE. Walrus is the only backend. A write appends to a local
+// write-ahead buffer and returns as soon as that append is durable, so no
+// request ever waits on a chain. A timer batches the buffer into one Walrus
+// quilt (see walrus-notes.mjs), and items move from the buffer to a local cache
+// only once Walrus has confirmed them. Reads are served from buffer plus cache,
+// never from the network.
 //
-// It degrades gracefully. With no MemWal credentials the client is absent, so
-// remember reports it could not store and recall returns nothing.
+// Reads are local by necessity, not laziness. A namespace's items end up spread
+// across every quilt that ever held it, so reading one folder from Walrus would
+// mean fetching hundreds of blobs. Because a Walrus blob is immutable, a local
+// copy can never go stale, so this costs no correctness. If the volume is lost,
+// the cache is rebuilt from the quilts on chain.
+//
+// This replaced the MemWal relayer, which was a single point of failure three
+// times: an upload pause on 2026-07-15, a total 502 outage on 2026-07-27, and a
+// 401 on 2026-08-04 after it shipped account-bound nonce auth. Walrus itself
+// stayed healthy throughout. Encryption was always ours, so nothing was given
+// up by dropping it.
 
 import { createServer } from "node:http";
 import { scryptSync, randomBytes, createCipheriv, createDecipheriv, createHash } from "node:crypto";
-import { MemWal } from "@mysten-incubation/memwal";
 import { ensure as ensureWalrus } from "./walrus-files.mjs";
 import { ensure as ensureZeroG } from "./zerog-files.mjs";
+import { ensureClients as ensureWalrusClients, balances as walrusBalances } from "./walrus-client.mjs";
+import {
+  flush as flushQuilt,
+  readQuilt,
+  readIndex as readQuiltIndex,
+  writeIndex as writeQuiltIndex,
+  recoverQuilts,
+  renewExpiring,
+} from "./walrus-notes.mjs";
 import {
   appendItem as localAppend,
   readItems as localRead,
   listNamespaces as localNamespaces,
-  removeItems as localRemove,
   pendingCount as localPending,
+  readCached as localCached,
+  listCachedNamespaces as localCachedNamespaces,
+  cachedCount as localCachedCount,
+  promoteToCache as localPromote,
+  writeCache as localWriteCache,
 } from "./localstore.mjs";
 
 const PORT = Number(process.env.MEMORY_SVC_PORT || 4000);
@@ -34,43 +57,35 @@ const MAX_BODY = 512 * 1024;
 // File uploads carry base64 bytes, so they need a much larger body cap than a
 // note. base64 inflates by about a third, so this allows roughly a 9 MB file.
 const FILE_MAX_BODY = Number(process.env.AGENT_MEMORY_FILE_MAX_BYTES || 12 * 1024 * 1024);
-// First-pass pull size per folder. When the relayer reports more items than
-// this, recall refetches up to FETCH_MAX so growth past one page does not
-// silently drop older memories out of reach.
+// Retained so recall's paging logic keeps its shape. Both tiers are local now,
+// so a read returns the whole namespace in one pass and the second fetch never
+// triggers; they stay because the truncated flag they feed is part of the API.
 const FETCH_LIMIT = Number(process.env.AGENT_MEMORY_FETCH_LIMIT || 100);
 const FETCH_MAX = Number(process.env.AGENT_MEMORY_FETCH_MAX || 500);
-// How long to wait for the relayer to confirm a write before reporting failure.
-// Kept under the HTTP client's own remember timeout so the caller always gets
-// a definite answer from us rather than a transport timeout.
-const REMEMBER_TIMEOUT_MS = Number(process.env.AGENT_MEMORY_REMEMBER_TIMEOUT_MS || 45000);
-// A relayer read gets a hard deadline of its own, because a hung relayer does
-// not fail fast: the SDK sits on the socket for ~30s per call. Attempts times
-// timeout is the worst case a recall can cost, and it must stay under the HTTP
-// client's recall timeout (30s, core/agent_memory.py) or every call to a
-// degraded relayer times out at the transport and the local fallback is never
-// reached. 2 x 8s leaves room for the merge and the reply.
-const RECALL_ATTEMPTS = Number(process.env.AGENT_MEMORY_RECALL_ATTEMPTS || 2);
-const RECALL_ATTEMPT_MS = Number(process.env.AGENT_MEMORY_RECALL_ATTEMPT_MS || 8000);
-// After a failed read, stop calling the relayer for this long and serve the
-// local store directly. Short enough that recovery is picked up within a
-// minute, long enough that no single request pays the timeout twice.
-const RELAYER_COOLDOWN_MS = Number(process.env.AGENT_MEMORY_RELAYER_COOLDOWN_MS || 60000);
-// Epoch ms until which the relayer is treated as down. 0 means "try it".
-let relayerDownUntil = 0;
-
-// Draining the local store back upstream. The local store is a buffer for an
-// outage, not a second home: without this, everything written while the relayer
-// was down stays local forever and the two copies quietly diverge.
+// How often the write-ahead buffer is batched into a Walrus quilt.
 //
-// Spacing respects the managed relayer's published rate limits (60 points per
-// minute burst, remember costs 5, so 12 writes a minute is the ceiling). 6s
-// spacing sits under that with room for real traffic alongside the drain.
-const DRAIN_INTERVAL_MS = Number(process.env.AGENT_MEMORY_DRAIN_INTERVAL_MS || 300000);
-const DRAIN_BATCH = Number(process.env.AGENT_MEMORY_DRAIN_BATCH || 20);
-const DRAIN_SPACING_MS = Number(process.env.AGENT_MEMORY_DRAIN_SPACING_MS || 6000);
-let draining = false;
+// This is the only real cost dial. Walrus charges per blob, near enough flat up
+// to 64 KB, so one flush costs the same whether it carries one note or a
+// thousand: 0.2994 WAL and 0.0100 SUI, measured on mainnet 2026-08-04. Six
+// hours means at most four flushes a day (~1.2 WAL/day) and means a note is
+// buffer-only for at most six hours. A cycle with an empty buffer writes
+// nothing and costs nothing, so the real bill tracks how much is actually
+// written rather than the ceiling.
+const FLUSH_INTERVAL_MS = Number(process.env.AGENT_MEMORY_FLUSH_INTERVAL_MS || 6 * 3600 * 1000);
+// Cap on how many items go into a single quilt, so one enormous backlog cannot
+// build a blob past the flat-rate band and turn one cheap write into a dear one.
+const FLUSH_MAX_ITEMS = Number(process.env.AGENT_MEMORY_FLUSH_MAX_ITEMS || 2000);
+let flushing = false;
+let lastFlush = null; // { at, blobId, count } of the most recent successful flush
+let lastFlushError = null;
 
-const SERVER_URL = process.env.MEMWAL_SERVER_URL || "https://relayer.memwal.ai";
+// How near expiry a quilt must be before it is extended, in Walrus epochs.
+// Quilts are written for 53 epochs (~2 years), so this should sit idle for a
+// very long time. It runs daily anyway: the renewal job that saves the data has
+// to already exist on the day it is first needed. Every one of our 36 testnet
+// file blobs expired unnoticed for want of exactly this.
+const RENEW_WITHIN_EPOCHS = Number(process.env.AGENT_MEMORY_RENEW_WITHIN_EPOCHS || 5);
+const RENEW_INTERVAL_MS = Number(process.env.AGENT_MEMORY_RENEW_INTERVAL_MS || 24 * 3600 * 1000);
 
 // Identities this service refuses to serve, comma separated. Retiring an
 // identity revokes read and write access through this service; the ciphertext
@@ -83,21 +98,12 @@ function isRetired(user) {
   return RETIRED.has(user.toLowerCase());
 }
 
-// The MemWal client is used directly (not through a convenience wrapper) so
-// write failures surface as errors we can report, instead of being logged and
-// swallowed upstream. Without credentials the sidecar runs in disabled mode.
-function createClient() {
-  const key = process.env.MEMWAL_PRIVATE_KEY;
-  const accountId = process.env.MEMWAL_ACCOUNT_ID;
-  if (!key || !accountId) return null;
-  try {
-    return MemWal.create({ key, accountId, serverUrl: SERVER_URL });
-  } catch (e) {
-    console.error("agent-memory-svc: could not create the MemWal client:", e?.message || e);
-    return null;
-  }
-}
-const client = createClient();
+// Memory is enabled when there is a funded Sui key to store it with. Without
+// one, notes would live only on a container's disk with nothing behind them,
+// which is not the product, so the sidecar says so rather than pretending.
+// Checked synchronously here so every request path has a cheap answer; the
+// clients themselves are built lazily on first use.
+const client = process.env.WALRUS_SUI_KEY ? true : null;
 
 // --- crypto: passphrase -> key, AES-256-GCM per item -----------------------
 
@@ -275,176 +281,140 @@ async function generationOf(user, folder) {
   return gen;
 }
 
-// --- relayer access ---------------------------------------------------------
+// --- storage ----------------------------------------------------------------
 
-// Store one encrypted item and wait for the relayer to confirm it reached
-// Walrus. If the relayer write fails (e.g. its upload pause), fall back to the
-// local encrypted store so the write still succeeds, and return a local
-// receipt. The item is the same opaque ciphertext either way.
-async function storeConfirmed(namespace, blob) {
-  // While the breaker is open the relayer is known to be failing, so a write
-  // would spend the full confirmation timeout only to fall back anyway. Go
-  // straight to local; the cooldown lets the next write try the relayer again,
-  // so recovery is picked up on its own.
-  if (Date.now() < relayerDownUntil) return storeLocal(namespace, blob);
-  try {
-    const receipt = await client.rememberAndWait(blob, namespace, {
-      timeoutMs: REMEMBER_TIMEOUT_MS,
-    });
-    relayerDownUntil = 0;
-    return receipt;
-  } catch (e) {
-    relayerDownUntil = Date.now() + RELAYER_COOLDOWN_MS;
-    console.warn(
-      `agent-memory-svc: relayer write failed, storing locally for the next ` +
-        `${Math.round(RELAYER_COOLDOWN_MS / 1000)}s: ${String(e?.message || e)}`
-    );
-    try {
-      return storeLocal(namespace, blob);
-    } catch {
-      // Both the relayer and the local store failed; surface the relayer error.
-      throw e;
-    }
-  }
-}
-
-// Append to the local encrypted store and hand back a receipt marked local, so
-// a caller can tell a locally-held write from a Walrus-confirmed one.
-function storeLocal(namespace, blob) {
+// Store one encrypted item.
+//
+// The write goes to the local write-ahead buffer and returns as soon as that
+// append is durable, so a remember never waits on a chain: writes are fast and
+// cannot fail because a network is having a bad day. The flush timer is what
+// carries it to Walrus. Callers get a receipt marked local, and a later receipt
+// naming the quilt once it has been batched.
+function storeItem(namespace, blob) {
   localAppend(namespace, blob);
   const digest = createHash("sha256").update(blob).digest("hex").slice(0, 16);
   return { blob_id: "local:" + digest, local: true };
 }
 
-// Race a relayer call against a deadline. The MemWal client puts no timeout of
-// its own on a read, so a hung relayer holds the request for as long as the
-// socket stays open (~30s observed, per attempt). The losing promise cannot be
-// cancelled, so it gets a no-op catch: a late rejection must not surface as an
-// unhandled rejection and take the process down.
-function withDeadline(promise, ms, what) {
-  let timer;
-  const deadline = new Promise((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`${what} timed out after ${ms}ms`)), ms);
-  });
-  promise.catch(() => {});
-  return Promise.race([promise, deadline]).finally(() => clearTimeout(timer));
-}
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-// Push locally-buffered items back to the relayer, oldest first, and forget the
-// local copy only once the relayer has confirmed each one. Confirmation is what
-// makes dropping the local copy safe: an unconfirmed write would lose the item.
+// Batch everything in the buffer into one Walrus quilt.
 //
-// Stops at the first failure and leaves the rest for the next cycle, because a
-// relayer that just failed will almost certainly fail on the next item too, and
-// hammering it burns the rate limit that the real traffic needs. Never throws:
-// a drain problem must not take the sidecar down.
-async function drainLocal() {
-  if (!client || draining || Date.now() < relayerDownUntil) return;
-  draining = true;
-  let sent = 0;
+// Items move from buffer to cache only after Walrus confirms the write, and the
+// cache append happens before the buffer removal, so a crash at any point
+// leaves an item either still pending or duplicated, never lost. A duplicate is
+// harmless: the read path dedupes.
+//
+// Never throws. A failed flush leaves everything pending for the next cycle,
+// which is the whole point of a write-ahead buffer.
+async function flushToWalrus() {
+  if (!client || flushing) return null;
+  const batches = [];
+  let total = 0;
+  for (const namespace of localNamespaces()) {
+    const items = localRead(namespace);
+    if (!items.length) continue;
+    const room = FLUSH_MAX_ITEMS - total;
+    if (room <= 0) break;
+    const take = items.slice(0, room);
+    batches.push({ namespace, items: take });
+    total += take.length;
+  }
+  // Nothing buffered: write nothing, pay nothing. At four cycles a day this is
+  // what keeps the bill tracking real traffic instead of the clock.
+  if (!total) return null;
+
+  flushing = true;
   try {
-    for (const namespace of localNamespaces()) {
-      const items = localRead(namespace);
-      if (!items.length) continue;
-      const done = [];
-      for (const item of items) {
-        if (sent >= DRAIN_BATCH) break;
-        try {
-          await client.rememberAndWait(item, namespace, { timeoutMs: REMEMBER_TIMEOUT_MS });
-          done.push(item);
-          sent++;
-        } catch (e) {
-          relayerDownUntil = Date.now() + RELAYER_COOLDOWN_MS;
-          console.warn(
-            `agent-memory-svc: drain paused, relayer rejected a buffered item: ` +
-              `${String(e?.message || e)}`
-          );
-          break;
-        }
-        await sleep(DRAIN_SPACING_MS);
-      }
-      if (done.length) {
-        localRemove(namespace, done);
-        console.log(
-          `agent-memory-svc: drained ${done.length} buffered item(s) upstream from ${namespace}`
-        );
-      }
-      if (Date.now() < relayerDownUntil || sent >= DRAIN_BATCH) break;
-    }
-    if (sent) {
-      console.log(
-        `agent-memory-svc: drain cycle done, ${sent} item(s) restored upstream, ` +
-          `${localPending()} still buffered`
-      );
-    }
-  } catch (e) {
-    console.warn(`agent-memory-svc: drain cycle failed: ${String(e?.message || e)}`);
-  } finally {
-    draining = false;
-  }
-}
-
-// Fold the local fallback store into whatever the relayer returned. Items
-// written while the relayer was down live only here, so this runs on every
-// path, including the one that skipped the relayer entirely.
-function mergeLocal(namespace, memBlobs, memTotal) {
-  const local = localRead(namespace);
-  if (!local.length) return { blobs: memBlobs, total: memTotal };
-  const seen = new Set(memBlobs);
-  const merged = memBlobs.concat(local.filter((b) => !seen.has(b)));
-  return { blobs: merged, total: memTotal + local.length };
-}
-
-// Pull a folder's raw items: query the relayer (with retries) and always merge
-// in anything the local fallback holds for this namespace, so items written
-// during a relayer outage are visible alongside relayer-stored ones. Returns
-// { blobs, total }. Never throws on a relayer read failure; local still applies.
-async function pullFolder(namespace, query, limit) {
-  let memBlobs = [];
-  let memTotal = 0;
-  let lastError = null;
-  // One request can pull more than once (a recall looks up the folder's
-  // generation before reading its data), so a per-attempt deadline alone still
-  // multiplies: two pulls at the full budget overran the client timeout even
-  // after the deadline was added. The breaker makes the cost of a dead relayer
-  // per REQUEST, not per pull: the first failure opens it and every later pull
-  // goes straight to the local store until the cooldown expires.
-  if (Date.now() < relayerDownUntil) {
-    return mergeLocal(namespace, [], 0);
-  }
-  for (let attempt = 0; attempt < RECALL_ATTEMPTS; attempt++) {
-    try {
-      const r = await withDeadline(
-        client.recall({ query, limit, namespace }),
-        RECALL_ATTEMPT_MS,
-        "relayer read"
-      );
-      memBlobs = (r.results ?? []).map((x) => x.text).filter(Boolean);
-      memTotal = Number(r.total ?? memBlobs.length);
-      lastError = null;
-      break;
-    } catch (e) {
-      // retry; on the last attempt fall through to local-only
-      lastError = e;
-    }
-  }
-  if (lastError) {
-    relayerDownUntil = Date.now() + RELAYER_COOLDOWN_MS;
-    // Logged once per pull, not per attempt. Without this a relayer outage is
-    // invisible: recall still answers from the local store, so the only symptom
-    // is silence. Recall stays a success; this is the breadcrumb that explains
-    // why the answer holds only locally-stored items.
-    console.warn(
-      `agent-memory-svc: relayer read failed after ${RECALL_ATTEMPTS} attempt(s), ` +
-        `serving local store only for the next ${Math.round(RELAYER_COOLDOWN_MS / 1000)}s: ` +
-        `${String(lastError?.message || lastError)}`
+    const entry = await flushQuilt(batches);
+    for (const { namespace, items } of batches) localPromote(namespace, items);
+    lastFlush = { at: entry.at, blobId: entry.blobId, count: entry.count };
+    lastFlushError = null;
+    console.log(
+      `agent-memory-svc: flushed ${entry.count} item(s) across ${batches.length} ` +
+        `namespace(s) into quilt ${entry.blobId}, stored to epoch ${entry.endEpoch}`
     );
-  } else {
-    relayerDownUntil = 0;
+    return entry;
+  } catch (e) {
+    lastFlushError = String(e?.message || e);
+    console.warn(
+      `agent-memory-svc: flush failed, ${total} item(s) stay buffered for the ` +
+        `next cycle: ${lastFlushError}`
+    );
+    return null;
+  } finally {
+    flushing = false;
   }
-  return mergeLocal(namespace, memBlobs, memTotal);
+}
+
+// Rebuild the local cache from the quilts on Walrus.
+//
+// This is the disaster path: the volume was lost, or a fresh instance came up
+// against a wallet that already holds memory. It reads every quilt this wallet
+// owns and rewrites the cache from their contents, which is what makes the
+// local cache a cache rather than the only copy. Expired or unreadable quilts
+// are skipped rather than fatal, so one dead blob cannot block the rest.
+async function rehydrateFromWalrus() {
+  if (!client) return { quilts: 0, items: 0, skipped: 0 };
+  // Trust the local index when it is there, and fall back to a chain scan when
+  // it is not, which is exactly the case this function exists for.
+  let quilts = readQuiltIndex();
+  if (!quilts.length) {
+    quilts = await recoverQuilts();
+    if (quilts.length) writeQuiltIndex(quilts);
+  }
+
+  const byNamespace = new Map();
+  let skipped = 0;
+  for (const q of quilts) {
+    let contents = null;
+    try {
+      contents = await readQuilt(q.blobId);
+    } catch (e) {
+      console.warn(`agent-memory-svc: could not read quilt ${q.blobId}: ${String(e?.message || e)}`);
+    }
+    if (!contents) {
+      skipped++;
+      continue;
+    }
+    for (const [ns, items] of contents) {
+      const list = byNamespace.get(ns) ?? [];
+      list.push(...items);
+      byNamespace.set(ns, list);
+    }
+  }
+
+  let items = 0;
+  for (const [ns, list] of byNamespace) {
+    // Order is oldest quilt first, and duplicates can exist where a crash
+    // landed between the cache append and the buffer removal, so dedupe while
+    // preserving order.
+    const unique = [...new Set(list)];
+    localWriteCache(ns, unique);
+    items += unique.length;
+  }
+  console.log(
+    `agent-memory-svc: rehydrated ${items} item(s) across ${byNamespace.size} ` +
+      `namespace(s) from ${quilts.length - skipped} quilt(s), ${skipped} unreadable`
+  );
+  return { quilts: quilts.length, items, skipped };
+}
+
+// Gather a folder's raw items from both local tiers.
+//
+// Reads never touch the network. The cache holds what Walrus has confirmed, the
+// buffer holds what has not been flushed yet, and a note must be recallable the
+// instant it is written, so both count. Deduped because a crash between the
+// cache append and the buffer removal can leave an item in both.
+//
+// The signature keeps `query` and `limit` for its callers, though neither is
+// used any more: ranking was always done here against the decrypted text, so
+// the relayer's query was never what ordered the results.
+async function pullFolder(namespace, _query, _limit) {
+  const cached = localCached(namespace);
+  const pending = localRead(namespace);
+  if (!pending.length) return { blobs: cached, total: cached.length };
+  const seen = new Set(cached);
+  const merged = cached.concat(pending.filter((b) => !seen.has(b)));
+  return { blobs: merged, total: merged.length };
 }
 
 // --- http -------------------------------------------------------------------
@@ -477,20 +447,79 @@ const server = createServer(async (req, res) => {
     const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
 
     if (req.method === "GET" && url.pathname === "/health") {
-      // buffered_local and relayer_down make an outage legible from outside:
-      // recall keeps answering from the buffer, so without these the only
-      // symptom of a dead relayer is a number that never goes down.
+      // These numbers are what make a storage problem legible from outside.
+      // Recall keeps answering from local tiers whatever Walrus is doing, so
+      // without them a flush that has been failing for a week looks identical
+      // to one that is working: the only symptom is buffered_local never
+      // falling and last_flush going stale.
+      const quilts = readQuiltIndex();
       return send(res, 200, {
         status: "ok",
         enabled: client !== null,
-        relayer_down: Date.now() < relayerDownUntil,
         buffered_local: localPending(),
+        cached_local: localCachedCount(),
+        quilts: quilts.length,
+        last_flush: lastFlush,
+        last_flush_error: lastFlushError,
       });
     }
 
-    // Remember one item, encrypted, in this user's folder. Replies only after
-    // the relayer confirms the write, and carries the Walrus blob id back as a
-    // receipt. A failure is reported as ok:false with the reason.
+    // Wallet and storage detail, kept off /health because it costs two chain
+    // reads. This is where to look when a flush is failing and the reason might
+    // be an empty wallet.
+    if (req.method === "GET" && url.pathname === "/storage") {
+      const quilts = readQuiltIndex();
+      let wallet = null;
+      let walletError = null;
+      try {
+        const [state, bal] = await Promise.all([ensureWalrusClients(), walrusBalances()]);
+        wallet = {
+          address: state.address ?? null,
+          network: state.network ?? null,
+          sui: bal?.sui ?? null,
+          wal: bal?.wal ?? null,
+        };
+      } catch (e) {
+        walletError = String(e?.message || e);
+      }
+      return send(res, 200, {
+        enabled: client !== null,
+        buffered_local: localPending(),
+        cached_local: localCachedCount(),
+        namespaces: localCachedNamespaces().length,
+        quilts: quilts.length,
+        newest_quilt: quilts.length ? quilts[quilts.length - 1] : null,
+        last_flush: lastFlush,
+        last_flush_error: lastFlushError,
+        wallet,
+        wallet_error: walletError,
+      });
+    }
+
+    // Force a flush now rather than waiting for the timer. Useful after a
+    // failure has been fixed, and for proving the path end to end without
+    // sitting through a six-hour cycle.
+    if (req.method === "POST" && url.pathname === "/flush") {
+      const entry = await flushToWalrus();
+      return send(res, 200, {
+        flushed: entry !== null,
+        quilt: entry,
+        buffered_local: localPending(),
+        error: lastFlushError,
+      });
+    }
+
+    // Rebuild the local cache from the quilts on Walrus. The recovery path for
+    // a lost volume; safe to run at any time because it only ever rewrites the
+    // cache tier from what Walrus already holds.
+    if (req.method === "POST" && url.pathname === "/rehydrate") {
+      return send(res, 200, await rehydrateFromWalrus());
+    }
+
+    // Remember one item, encrypted, in this user's folder. Replies once the
+    // write-ahead append is durable on disk, carrying a local receipt; the
+    // flush timer batches it onto Walrus within FLUSH_INTERVAL_MS. A failure is
+    // reported as ok:false with the reason, never a silent success.
     if (req.method === "POST" && url.pathname === "/remember") {
       const body = await readJson(req);
       const user = (body.user || "").toString().trim().toLowerCase();
@@ -507,7 +536,7 @@ const server = createServer(async (req, res) => {
       const blob = encrypt(keyFor(user, passphrase), text);
       try {
         const gen = await generationOf(user, folder);
-        const receipt = await storeConfirmed(dataNamespaceOf(user, folder, gen), blob);
+        const receipt = await storeItem(dataNamespaceOf(user, folder, gen), blob);
         return send(res, 200, { ok: true, enabled: true, blob_id: receipt.blob_id || "" });
       } catch (e) {
         return send(res, 200, {
@@ -590,7 +619,7 @@ const server = createServer(async (req, res) => {
         return send(res, 403, { error: "The passphrase does not open this folder, so it cannot forget it." });
       }
       try {
-        await storeConfirmed(ctlNamespaceOf(user, folder), `gen:${gen + 1}`);
+        await storeItem(ctlNamespaceOf(user, folder), `gen:${gen + 1}`);
         return send(res, 200, { forgotten: true, enabled: true });
       } catch (e) {
         return send(res, 200, {
@@ -639,7 +668,7 @@ const server = createServer(async (req, res) => {
         v: 1, name, size: raw.length, blobId, contentType, ts: Date.now(),
       });
       try {
-        const receipt = await storeConfirmed(fileIndexNamespaceOf(user, folder), encrypt(key, manifest));
+        const receipt = await storeItem(fileIndexNamespaceOf(user, folder), encrypt(key, manifest));
         return send(res, 200, { ok: true, enabled: true, files_enabled: true, blob_id: blobId, receipt: receipt.blob_id || "" });
       } catch (e) {
         // The bytes are safely on Walrus; only the index write failed. Return
@@ -716,17 +745,59 @@ const server = createServer(async (req, res) => {
 });
 
 server.listen(PORT, HOST, () => {
-  const state = client ? "live" : "disabled (set MEMWAL_PRIVATE_KEY and MEMWAL_ACCOUNT_ID to enable)";
+  const state = client ? "live" : "disabled (set WALRUS_SUI_KEY to enable)";
   console.log(`agent-memory-svc listening on http://${HOST}:${PORT} - memory ${state}, encrypted per user`);
-  if (client && DRAIN_INTERVAL_MS > 0) {
-    const pending = localPending();
-    if (pending) {
-      console.log(
-        `agent-memory-svc: ${pending} item(s) buffered locally, draining upstream every ` +
-          `${Math.round(DRAIN_INTERVAL_MS / 1000)}s once the relayer answers`
+  if (!client) return;
+
+  const pending = localPending();
+  const cached = localCachedCount();
+  console.log(
+    `agent-memory-svc: ${pending} item(s) buffered, ${cached} cached from ` +
+      `${readQuiltIndex().length} quilt(s), flushing every ` +
+      `${Math.round(FLUSH_INTERVAL_MS / 60000)} min`
+  );
+
+  // A cache that is empty while quilts exist means this instance came up
+  // against storage it has never read: a replaced volume, or a new deployment
+  // pointed at an existing wallet. Recall would answer "nothing remembered",
+  // which is the one wrong answer a memory must never give, so rebuild first.
+  if (!cached && readQuiltIndex().length) {
+    rehydrateFromWalrus().catch((e) =>
+      console.warn(`agent-memory-svc: rehydrate on startup failed: ${String(e?.message || e)}`)
+    );
+  }
+
+  // unref so neither timer holds the process open on shutdown.
+  if (FLUSH_INTERVAL_MS > 0) {
+    setInterval(() => {
+      flushToWalrus().catch((e) =>
+        console.warn(`agent-memory-svc: flush cycle failed: ${String(e?.message || e)}`)
       );
-    }
-    // unref so a pending drain timer never holds the process open on shutdown.
-    setInterval(drainLocal, DRAIN_INTERVAL_MS).unref();
+    }, FLUSH_INTERVAL_MS).unref();
+  }
+  if (RENEW_INTERVAL_MS > 0) {
+    setInterval(() => {
+      renewExpiring(RENEW_WITHIN_EPOCHS)
+        .then((r) => {
+          if (r.renewed) {
+            console.log(`agent-memory-svc: extended ${r.renewed} quilt(s) nearing expiry`);
+          }
+        })
+        .catch((e) =>
+          console.warn(`agent-memory-svc: renewal check failed: ${String(e?.message || e)}`)
+        );
+    }, RENEW_INTERVAL_MS).unref();
   }
 });
+
+// Flush before going down, so a restart or redeploy does not leave freshly
+// written notes sitting in a buffer for another six hours. Best-effort and
+// time-boxed: the buffer is durable on disk either way, so a slow Walrus write
+// must not hold up a shutdown.
+for (const signal of ["SIGTERM", "SIGINT"]) {
+  process.on(signal, () => {
+    const done = () => process.exit(0);
+    setTimeout(done, 20000).unref();
+    flushToWalrus().then(done, done);
+  });
+}

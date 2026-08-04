@@ -29,24 +29,28 @@ services:
     restart: unless-stopped
     expose:
       - "4000"
-    # MemWal credentials come from the environment or a gitignored .env file next
-    # to this compose file. Without them the sidecar runs but stores nothing, and
-    # the app reports memory as unavailable instead of failing.
+    # The Sui key comes from the environment or a gitignored .env file next to
+    # this compose file. Without it the sidecar runs but reports memory as
+    # disabled, rather than keeping notes on a container's disk with nothing
+    # behind them.
     environment:
-      - MEMWAL_PRIVATE_KEY=${MEMWAL_PRIVATE_KEY:-}
-      - MEMWAL_ACCOUNT_ID=${MEMWAL_ACCOUNT_ID:-}
-      - MEMWAL_SERVER_URL=${MEMWAL_SERVER_URL:-https://relayer.memwal.ai}
       # Identities this service refuses to serve (comma separated), for
       # retiring a compromised or abandoned identity. Set in the same .env.
       - AGENT_MEMORY_RETIRED_USERS=${AGENT_MEMORY_RETIRED_USERS:-}
-      # File storage. WALRUS_SUI_KEY funds Walrus blob writes (primary);
-      # ZERO_G_PRIVATE_KEY funds 0G writes (failover). Without either, file
-      # endpoints report "not configured" and notes still work.
+      # The wallet that pays for everything on Walrus: notes, files, and gas.
       - WALRUS_SUI_KEY=${WALRUS_SUI_KEY:-}
+      # MUST be mainnet. The module defaults to testnet, where blobs are cheap
+      # and short-lived, and where all 36 of our earlier file blobs expired
+      # unrecoverably. A missing value here is a silent data-loss setting.
+      - WALRUS_NETWORK=${WALRUS_NETWORK:-mainnet}
+      # 0G Storage is the failover for FILE writes only. Notes never touch it.
       - ZERO_G_PRIVATE_KEY=${ZERO_G_PRIVATE_KEY:-}
+      # How often the write-ahead buffer is batched into one Walrus quilt.
+      - AGENT_MEMORY_FLUSH_INTERVAL_MS=${AGENT_MEMORY_FLUSH_INTERVAL_MS:-}
     mem_limit: 512m
     cpus: 0.5
-    # Persist the local encrypted fallback store (used when the relayer is down).
+    # The write-ahead buffer, the read cache, and the quilt index. Losing this
+    # volume costs anything not yet flushed; the rest rebuilds from Walrus.
     volumes:
       - agentqa_memdata:/svc/data
 
