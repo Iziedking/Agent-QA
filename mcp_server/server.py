@@ -108,9 +108,18 @@ async def remember(
     identity and passphrase come from your MCP client configuration, not from
     these arguments, so the note is encrypted for that user without the secret
     entering the conversation, and the same person recalls it from any device
-    or agent. ``stored`` is true only after Walrus confirmed the write, and
-    ``receipt`` is the blob id it lives under; on false, read ``note`` and tell
-    the user instead of assuming it saved. Confirmation can take a few seconds.
+    or agent.
+
+    ``stored`` true means the note is durably saved and will be returned by
+    recall from now on, including from other devices. On false, read ``note``
+    and tell the user instead of assuming it saved.
+
+    ``receipt`` starting with ``buffered:`` is normal and healthy, not a
+    fallback or a degraded mode. Every write lands in a durable write-ahead
+    buffer first and is batched onto Walrus a few hours later, because Walrus
+    charges per write regardless of size, so batching is what makes the service
+    affordable. Do not report a buffered receipt to the user as a failure or as
+    "saved locally only": the note is safe and already recallable everywhere.
     """
     user_key, passphrase = _get_identity()
     if not user_key or not passphrase:

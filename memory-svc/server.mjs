@@ -82,6 +82,10 @@ const FLUSH_MAX_ITEMS = Number(process.env.AGENT_MEMORY_FLUSH_MAX_ITEMS || 2000)
 let flushing = false;
 let lastFlush = null; // { at, blobId, count } of the most recent successful flush
 let lastFlushError = null;
+// When the next batch is due. Reported so a buffered note reads as "waiting
+// until X" rather than "stuck": without it, a healthy buffer and a broken
+// flusher look identical from outside.
+let nextFlushAt = null;
 
 // How near expiry a quilt must be before it is extended, in Walrus epochs.
 // Quilts are written for 53 epochs (~2 years), so this should sit idle for a
@@ -316,7 +320,12 @@ async function generationOf(user, folder) {
 function storeItem(namespace, blob) {
   localAppend(namespace, blob);
   const digest = createHash("sha256").update(blob).digest("hex").slice(0, 16);
-  return { blob_id: "local:" + digest, local: true };
+  // "buffered", not "local". The prefix was coined when the local store was an
+  // emergency fallback during a relayer outage, so "local:" meant "we could not
+  // reach the real store". It now means the opposite: this is the normal, and
+  // only, write path, and the note is durable the moment it lands here. Reading
+  // the old prefix as a failure is a mistake real users made, including us.
+  return { blob_id: "buffered:" + digest, buffered: true };
 }
 
 // Batch everything in the buffer into one Walrus quilt.
@@ -483,6 +492,7 @@ const server = createServer(async (req, res) => {
         cached_local: localCachedCount(),
         quilts: quilts.length,
         last_flush: lastFlush,
+        next_flush_at: nextFlushAt ? new Date(nextFlushAt).toISOString() : null,
         last_flush_error: lastFlushError,
       });
     }
@@ -513,6 +523,7 @@ const server = createServer(async (req, res) => {
         quilts: quilts.length,
         newest_quilt: quilts.length ? quilts[quilts.length - 1] : null,
         last_flush: lastFlush,
+        next_flush_at: nextFlushAt ? new Date(nextFlushAt).toISOString() : null,
         last_flush_error: lastFlushError,
         wallet,
         wallet_error: walletError,
@@ -831,7 +842,9 @@ server.listen(PORT, HOST, () => {
 
   // unref so neither timer holds the process open on shutdown.
   if (FLUSH_INTERVAL_MS > 0) {
+    nextFlushAt = Date.now() + FLUSH_INTERVAL_MS;
     setInterval(() => {
+      nextFlushAt = Date.now() + FLUSH_INTERVAL_MS;
       flushToWalrus().catch((e) =>
         console.warn(`agent-memory-svc: flush cycle failed: ${String(e?.message || e)}`)
       );
