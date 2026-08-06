@@ -9,9 +9,21 @@ Free to try. No account, no wallet, no signup.
 ## Setup, two commands
 
 ```bash
-npx agent-memory-connect setup
-claude mcp add -s user agent-memory -- npx -y agent-memory-connect
+npm install -g agent-memory-connect
+agent-memory setup
 ```
+
+Then wire your agent to it:
+
+```bash
+claude mcp add -s user agent-memory -- agent-memory
+```
+
+Install it globally rather than running it through `npx`. `npx` re-resolves the
+package from the registry every single launch, which measured **16.5 seconds**
+against **4.0 seconds** for the installed binary on Windows. Some clients give
+an MCP server only 30 seconds to start and will drop the connection, and Codex
+does exactly that.
 
 The first command asks three things:
 
@@ -30,18 +42,29 @@ a week later.
 server, can read your notes or reset it. Put it in your password manager before
 you carry on.
 
-Not on Claude Code? Same setup, different second line:
+Not on Claude Code? Same setup, different second step:
 
 ```toml
 # ~/.codex/config.toml
 [mcp_servers.agent-memory]
-command = "npx"
-args = ["-y", "agent-memory-connect"]
+command = "agent-memory"
+# Codex allows 30s for a server to start and is strict about it. Raise this if
+# you see "MCP client for agent-memory timed out", which usually means the
+# command is still going through npx.
+startup_timeout_sec = 60
 ```
 
 ```json
 // Cursor and most other MCP clients
-{ "command": "npx", "args": ["-y", "agent-memory-connect"] }
+{ "command": "agent-memory" }
+```
+
+On Windows some clients cannot launch a `.cmd` shim directly. If yours reports
+the command as not found, wrap it:
+
+```toml
+command = "cmd"
+args = ["/c", "agent-memory"]
 ```
 
 `-s user` makes the memory available in every project on the machine. Drop it to

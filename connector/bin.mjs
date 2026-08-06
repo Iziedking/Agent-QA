@@ -182,10 +182,18 @@ async function setup() {
   const viaNpm = self.includes("node_modules");
   console.log(`\nStored in ${storedIn}. Wire an agent to this device's memory with one line:\n`);
   if (viaNpm) {
-    console.log("  claude code   claude mcp add -s user agent-memory -- npx -y agent-memory-connect");
-    console.log('  codex         [mcp_servers.agent-memory] in ~/.codex/config.toml:');
-    console.log('                command = "npx"  args = ["-y", "agent-memory-connect"]');
-    console.log('  cursor, etc.  { "command": "npx", "args": ["-y", "agent-memory-connect"] }');
+    // Deliberately NOT "npx -y agent-memory-connect". npx re-resolves the
+    // package from the registry on every launch: 16.5s measured against 4.0s
+    // for the installed binary. Clients that cap server startup at 30s (Codex
+    // does) then drop the connection, which reads as the memory being broken.
+    console.log("  first, once  npm install -g agent-memory-connect");
+    console.log("  claude code  claude mcp add -s user agent-memory -- agent-memory");
+    console.log('  codex        [mcp_servers.agent-memory] in ~/.codex/config.toml:');
+    console.log('               command = "agent-memory"');
+    console.log('               startup_timeout_sec = 60');
+    console.log('  cursor, etc. { "command": "agent-memory" }');
+    console.log("\n  On Windows, if your client cannot launch the .cmd shim, use");
+    console.log('  command = "cmd" with args ["/c", "agent-memory"].');
   } else {
     console.log(`  claude code   claude mcp add -s user agent-memory -- node "${self}"`);
     console.log(`  cursor, etc.  { "command": "node", "args": ["${self.replace(/\\/g, "\\\\")}"] }`);
