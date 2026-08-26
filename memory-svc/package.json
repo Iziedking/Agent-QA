@@ -5,11 +5,11 @@
   "description": "Portable agent memory sidecar: encrypts each user's items under their passphrase and keeps them on Walrus through MemWal, organised as user -> folder -> items, so any agent recalls the same memory from any machine.",
   "type": "module",
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "scripts": {
     "start": "node server.mjs",
-    "test": "node --test"
+    "test": "node --test *.test.mjs"
   },
   "dependencies": {
     "@0gfoundation/0g-storage-ts-sdk": "^1.2.10",

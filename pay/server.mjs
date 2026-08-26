@@ -53,6 +53,15 @@ const PRICE = process.env.X402_PRICE || "$0.01";
 // payment that never lands.
 const SYNC_SETTLE = process.env.X402_SYNC_SETTLE !== "false";
 
+// AGON uses Circle Gateway on Arc Testnet. This second lane is optional and
+// remains dark unless all of its settings are explicit. The existing OKX/X
+// Layer route remains unchanged.
+const AGON_X402_ENABLED = process.env.AGON_X402_ENABLED === "true";
+const AGON_NETWORK = "eip155:5042002";
+const AGON_FACILITATOR = "https://gateway-api-testnet.circle.com";
+const AGON_PAY_TO = process.env.AGON_X402_PAY_TO || "";
+const AGON_PRICE = process.env.AGON_X402_PRICE || "$0.01";
+
 const okxConfig = {
   apiKey: process.env.OKX_API_KEY || "",
   secretKey: process.env.OKX_SECRET_KEY || "",
@@ -148,6 +157,27 @@ app.set("trust proxy", 1);
 // absurd before the paywall has even run.
 app.use(express.json({ limit: "1mb" }));
 
+let requireAgonPayment = null;
+if (AGON_X402_ENABLED) {
+  if (!/^0x[0-9a-fA-F]{40}$/.test(AGON_PAY_TO)) {
+    console.error("pay: refusing to start, AGON_X402_PAY_TO is not an EVM address");
+    process.exit(1);
+  }
+  try {
+    const { createGatewayMiddleware } = await import("@circle-fin/x402-batching/server");
+    const gateway = createGatewayMiddleware({
+      sellerAddress: AGON_PAY_TO,
+      networks: AGON_NETWORK,
+      facilitatorUrl: AGON_FACILITATOR,
+      description: DESCRIPTION,
+    });
+    requireAgonPayment = gateway.require(AGON_PRICE);
+  } catch (error) {
+    console.error(`pay: refusing to start, Circle Gateway initialization failed: ${error.message}`);
+    process.exit(1);
+  }
+}
+
 app.use(
   paymentMiddleware(
     {
@@ -182,7 +212,7 @@ app.use(
   ),
 );
 
-app.post("/x402/memory", async (req, res) => {
+async function servePaidMemory(req, res) {
   const body = req.body ?? {};
 
   // The buyer has already paid by the time we get here, so a missing parameter is
@@ -242,10 +272,52 @@ app.post("/x402/memory", async (req, res) => {
     console.error(`pay: upstream ${operation.target} failed:`, error.message);
     res.status(502).json({ error: "the memory service is unavailable, payment was taken" });
   }
-});
+}
+
+app.post("/x402/memory", servePaidMemory);
+
+app.post(
+  "/x402/agon-memory",
+  (req, res, next) => {
+    if (!requireAgonPayment) {
+      res.status(503).json({ error: "Arc Testnet x402 is not enabled for this provider" });
+      return;
+    }
+    try {
+      Promise.resolve(requireAgonPayment(req, res, next)).catch(next);
+    } catch (error) {
+      next(error);
+    }
+  },
+  servePaidMemory,
+);
 
 app.get("/x402/health", (_req, res) => {
-  res.json({ status: "ok", service: "agent-qa-pay", network: NETWORK });
+  res.json({
+    status: "ok",
+    service: "agent-qa-pay",
+    routes: {
+      okx: { enabled: true, network: NETWORK, path: "/x402/memory" },
+      agon: { enabled: AGON_X402_ENABLED, network: AGON_NETWORK, path: "/x402/agon-memory" },
+    },
+  });
+});
+
+app.get("/agon/manifest.json", (_req, res) => {
+  res.json({
+    version: 1,
+    name: "Agent QA Runtime Memory",
+    description: DESCRIPTION,
+    category: "analysis",
+    endpoint: "https://agentsqa.xyz/x402/agon-memory",
+    tags: ["memory", "agents", "analysis", "walrus"],
+    pricing: { rail: "x402", amountUSDC: AGON_PRICE.replace(/^\$/, "") },
+    execution: {
+      network: AGON_NETWORK,
+      challengeEndpoint: "https://agentsqa.xyz/agon/v1/challenge",
+      externalWrites: false,
+    },
+  });
 });
 
 app.listen(PORT, () => {

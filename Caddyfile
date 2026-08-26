@@ -7,6 +7,14 @@
 # the ACME_EMAIL environment variable; it is intentionally left out here.
 
 agentsqa.xyz {
+	handle /agon/manifest.json {
+		reverse_proxy pay:9100
+	}
+
+	handle /agon/v1/* {
+		reverse_proxy memory:4000
+	}
+
 	# The paid lane. Marketplace buyers pay here and the pay service forwards to
 	# the app once payment clears. Listed before the catch-all below because Caddy
 	# matches the most specific route, and the console must not end up behind the

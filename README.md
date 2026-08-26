@@ -12,6 +12,20 @@ Agent QA moves the memory to you. Every note is encrypted under a key derived fr
 
 Memory is quality assurance for agents: an agent that remembers its decisions, its trades, and its mistakes is a better agent every session.
 
+## AGON provider agent
+
+The memory service exposes a read-only AGON Playground challenge at
+`POST /agon/v1/challenge`. It runs the real recall-ranking policy against a
+bounded evidence set, quarantines instructions embedded inside recalled text,
+and always reports `writesPerformed: false`. The challenge never accepts a
+memory identity, passphrase, payment, or wallet action.
+
+The paid memory service keeps its X Layer route at `POST /x402/memory`. An
+independent AGON route is available at `POST /x402/agon-memory`; it settles only
+on Arc Testnet through Circle Gateway and stays unavailable unless
+`AGON_X402_ENABLED=true` and `AGON_X402_PAY_TO` are configured. Enabling the
+provider route does not enable AGON's buyer or send a payment by itself.
+
 ## What you get
 
 - **Three tools, any agent.** `remember` stores one note, `recall` brings back what is relevant, and `forget` retires a folder for good. Any MCP client carries them: Claude Code, Cursor, Codex, or a custom agent.
@@ -89,5 +103,3 @@ Forget retires a folder permanently: no recall returns its notes again, and the 
 - Each confirmed write returns a Walrus blob id, so a note is not just stored but provable.
 - Forgetting is revocation, not erasure, because immutable storage offers nothing stronger, and we say so. Key destruction is the only true delete.
 - The service in front is stateless. Point your agents at the hosted endpoint or run your own from the published compose files; the memory model does not change.
-
-

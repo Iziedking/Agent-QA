@@ -54,6 +54,7 @@ import {
   promoteToCache as localPromote,
   writeCache as localWriteCache,
 } from "./localstore.mjs";
+import { AGON_MEMORY_AGENT, runAgonMemoryChallenge } from "./agon-agent.mjs";
 
 const PORT = Number(process.env.MEMORY_SVC_PORT || 4000);
 const HOST = process.env.MEMORY_SVC_HOST || "0.0.0.0";
@@ -495,6 +496,27 @@ const server = createServer(async (req, res) => {
         next_flush_at: nextFlushAt ? new Date(nextFlushAt).toISOString() : null,
         last_flush_error: lastFlushError,
       });
+    }
+
+    if (req.method === "GET" && url.pathname === "/agon/v1/agent") {
+      return send(res, 200, {
+        protocol: "agon-playground/1",
+        agent: AGON_MEMORY_AGENT,
+        challenge: "/agon/v1/challenge",
+        writesPerformed: false,
+      });
+    }
+
+    // Read-only adversarial proof surface for AGON Arena. It exercises the
+    // memory ranking and instruction-quarantine policy without accepting an
+    // identity, passphrase, storage mutation, payment, or wallet action.
+    if (req.method === "POST" && url.pathname === "/agon/v1/challenge") {
+      const body = await readJson(req, 32 * 1024);
+      try {
+        return send(res, 200, runAgonMemoryChallenge(body));
+      } catch (error) {
+        return send(res, 400, { error: String(error?.message || error) });
+      }
     }
 
     // Wallet and storage detail, kept off /health because it costs two chain

@@ -76,6 +76,11 @@ services:
       - X402_PAY_TO=${X402_PAY_TO:-}
       # Per-call price. Must match the fee on the marketplace listing.
       - X402_PRICE=${X402_PRICE:-}
+      # Optional AGON lane. It settles only on Arc Testnet through Circle
+      # Gateway and stays unavailable unless explicitly enabled.
+      - AGON_X402_ENABLED=${AGON_X402_ENABLED:-false}
+      - AGON_X402_PAY_TO=${AGON_X402_PAY_TO:-}
+      - AGON_X402_PRICE=${AGON_X402_PRICE:-$0.01}
     mem_limit: 256m
     cpus: 0.5
     depends_on:

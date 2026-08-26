@@ -2,7 +2,7 @@
 # encrypted memory on Walrus and exposes remember / recall over HTTP for the
 # app to call internally.
 
-FROM node:20-slim
+FROM node:22-slim
 
 ENV NODE_ENV=production
 WORKDIR /svc

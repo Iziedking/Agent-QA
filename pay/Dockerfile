@@ -1,7 +1,7 @@
 # The x402 paid lane: a small Node service that takes payment on X Layer through
 # the OKX facilitator and forwards the paid call to the app internally.
 
-FROM node:20-slim
+FROM node:22-slim
 
 ENV NODE_ENV=production
 WORKDIR /svc
