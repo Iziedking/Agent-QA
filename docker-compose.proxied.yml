@@ -12,7 +12,8 @@
 #      plus OKX_API_KEY / OKX_SECRET_KEY / OKX_PASSPHRASE / X402_PAY_TO for the
 #      paid lane (see deploy.md).
 #   3. Add the agentsqa.xyz site block to your ingress Caddyfile (see deploy.md),
-#      routing /x402/* to agentqa-pay:9100 and everything else to agentqa-app:9090.
+#      routing /x402/* and /agon/manifest.json to agentqa-pay:9100,
+#      /agon/v1/* to agentqa-memory:4000, and everything else to agentqa-app:9090.
 #
 # This is the file that deploys agentsqa.xyz. `docker compose up -d` WITHOUT
 # `-f docker-compose.proxied.yml` picks up docker-compose.yml instead, which
@@ -60,6 +61,11 @@ services:
       - X402_PAY_TO=${X402_PAY_TO:-}
       # Must match the fee on the listing.
       - X402_PRICE=${X402_PRICE:-}
+      # Optional AGON Arc Testnet lane. It stays unavailable until the recipient
+      # and explicit enable flag are set in the gitignored production .env.
+      - AGON_X402_ENABLED=${AGON_X402_ENABLED:-false}
+      - AGON_X402_PAY_TO=${AGON_X402_PAY_TO:-}
+      - AGON_X402_PRICE=${AGON_X402_PRICE:-$0.01}
     depends_on:
       - app
     mem_limit: 256m

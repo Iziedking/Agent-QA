@@ -15,7 +15,7 @@ RUN npm ci --omit=dev
 # Copy every source module, not just the entrypoint, or an import of a sibling
 # file crash-loops the container. This has taken production down once already,
 # so add the file here in the same commit that creates it.
-COPY server.mjs walrus-client.mjs walrus-notes.mjs walrus-files.mjs \
+COPY server.mjs agon-agent.mjs walrus-client.mjs walrus-notes.mjs walrus-files.mjs \
      zerog-files.mjs localstore.mjs ./
 
 # The write-ahead buffer, the read cache, and the quilt index all live here.
