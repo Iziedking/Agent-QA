@@ -227,6 +227,12 @@ async def docs() -> FileResponse:
     return FileResponse(WEB_DIR / "index.html")
 
 
+@app.get("/agon/agentqa.png", include_in_schema=False)
+async def agentqa_logo() -> FileResponse:
+    """Serve the public AgentQA marketplace logo."""
+    return FileResponse(WEB_DIR / "agentqa.png", media_type="image/png")
+
+
 @app.get("/health", response_model=HealthResponse, tags=["meta"])
 async def health() -> HealthResponse:
     """Return a simple liveness signal."""
