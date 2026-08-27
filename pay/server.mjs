@@ -310,7 +310,17 @@ app.get("/agon/manifest.json", (_req, res) => {
     description: DESCRIPTION,
     category: "analysis",
     endpoint: "https://agentsqa.xyz/x402/agon-memory",
-    tags: ["memory", "agents", "analysis", "walrus"],
+    logoUrl: "https://agentsqa.xyz/agon/agentqa.png",
+    tags: [
+      "agent-memory",
+      "runtime-memory",
+      "context-memory",
+      "encrypted-memory",
+      "mcp",
+      "walrus",
+      "agent-infrastructure",
+      "recall",
+    ],
     pricing: { rail: "x402", amountUSDC: AGON_PRICE.replace(/^\$/, "") },
     execution: {
       network: AGON_NETWORK,
