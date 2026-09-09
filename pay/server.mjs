@@ -143,6 +143,45 @@ const INPUT_SCHEMA = { type: "object", properties: PROPERTIES, required: REQUIRE
 const DESCRIPTION =
   "Private, portable memory for an agent: store a note, recall context, or retire a folder, encrypted under a passphrase only the caller holds.";
 
+function getPaidMemoryValidationError(body) {
+  const absent = REQUIRED.filter((name) => !body[name]);
+  if (absent.length > 0) {
+    return {
+      error: `missing required body param "${absent[0]}"`,
+      required: REQUIRED,
+      inputSchema: INPUT_SCHEMA,
+    };
+  }
+
+  const operation = OPERATIONS[body.operation];
+  if (!operation) {
+    return {
+      error: `unknown operation "${body.operation}"`,
+      required: REQUIRED,
+      inputSchema: INPUT_SCHEMA,
+    };
+  }
+
+  if (operation.extra && !body[operation.extra]) {
+    return {
+      error: `missing required body param "${operation.extra}" for operation "${body.operation}"`,
+      required: [...REQUIRED, operation.extra],
+      inputSchema: INPUT_SCHEMA,
+    };
+  }
+
+  return null;
+}
+
+function validatePaidMemoryRequest(req, res, next) {
+  const validationError = getPaidMemoryValidationError(req.body ?? {});
+  if (validationError) {
+    res.status(400).json(validationError);
+    return;
+  }
+  next();
+}
+
 const facilitator = new OKXFacilitatorClient(okxConfig);
 const resourceServer = registerExactEvmScheme(new x402ResourceServer(facilitator), {
   networks: [NETWORK],
@@ -177,6 +216,11 @@ if (AGON_X402_ENABLED) {
     process.exit(1);
   }
 }
+
+// Validate before either payment middleware can sign, verify, or deduct anything.
+// The handler keeps the same check as a defense-in-depth guard.
+app.use("/x402/memory", validatePaidMemoryRequest);
+app.use("/x402/agon-memory", validatePaidMemoryRequest);
 
 app.use(
   paymentMiddleware(
@@ -215,40 +259,15 @@ app.use(
 async function servePaidMemory(req, res) {
   const body = req.body ?? {};
 
-  // The buyer has already paid by the time we get here, so a missing parameter is
-  // our last chance to tell them what was wrong in a way their agent can act on.
-  // Naming the parameter is what lets it retry correctly instead of surfacing an
-  // opaque failure to its user.
-  const absent = REQUIRED.filter((name) => !body[name]);
-  if (absent.length > 0) {
-    res.status(400).json({
-      error: `missing required body param "${absent[0]}"`,
-      required: REQUIRED,
-      inputSchema: INPUT_SCHEMA,
-    });
+  // Keep this guard in case the handler is mounted on another route without
+  // validatePaidMemoryRequest.
+  const validationError = getPaidMemoryValidationError(body);
+  if (validationError) {
+    res.status(400).json(validationError);
     return;
   }
 
   const operation = OPERATIONS[body.operation];
-  if (!operation) {
-    res.status(400).json({
-      error: `unknown operation "${body.operation}"`,
-      required: REQUIRED,
-      inputSchema: INPUT_SCHEMA,
-    });
-    return;
-  }
-
-  // The parameter this particular operation cannot work without. Same reasoning
-  // as above: name it, so the buyer's agent can ask for the one thing it missed.
-  if (operation.extra && !body[operation.extra]) {
-    res.status(400).json({
-      error: `missing required body param "${operation.extra}" for operation "${body.operation}"`,
-      required: [...REQUIRED, operation.extra],
-      inputSchema: INPUT_SCHEMA,
-    });
-    return;
-  }
 
   // The app takes the operation as the route, not as a field. Everything else it
   // ignores what it does not know, so forward the body as-is minus our own knob.
