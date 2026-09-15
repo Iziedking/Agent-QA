@@ -222,6 +222,10 @@ if (AGON_X402_ENABLED) {
 app.use("/x402/memory", validatePaidMemoryRequest);
 app.use("/x402/agon-memory", validatePaidMemoryRequest);
 
+// @okxweb3/x402-express 0.1.1, installed in this service and read on 2026-09-15:
+// its fifth paymentMiddleware argument controls facilitator sync at startup.
+// Keep OKX verification and settlement unchanged, but defer its capability
+// lookup until an OKX request so the optional AGON lane has an independent boot.
 app.use(
   paymentMiddleware(
     {
@@ -253,6 +257,9 @@ app.use(
       },
     },
     resourceServer,
+    undefined,
+    undefined,
+    false,
   ),
 );
 
