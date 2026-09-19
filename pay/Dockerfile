@@ -11,7 +11,7 @@ WORKDIR /svc
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
-COPY server.mjs ./
+COPY server.mjs agon-gate.mjs agon-manifest.mjs bounded-json.mjs ./
 
 # Run as a non-root user. This service holds the OKX API credentials in its
 # environment and writes nothing to disk, so it needs no data directory.
