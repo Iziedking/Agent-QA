@@ -27,6 +27,9 @@ import { OKXFacilitatorClient } from "@okxweb3/x402-core";
 import { x402ResourceServer } from "@okxweb3/x402-core/server";
 import { registerExactEvmScheme } from "@okxweb3/x402-evm/exact/server";
 import { paymentMiddleware } from "@okxweb3/x402-express";
+import { createAgonPaymentGate } from "./agon-gate.mjs";
+import { createAgonManifest } from "./agon-manifest.mjs";
+import { readBoundedJson } from "./bounded-json.mjs";
 
 const PORT = Number(process.env.PORT || 9100);
 
@@ -61,6 +64,7 @@ const AGON_NETWORK = "eip155:5042002";
 const AGON_FACILITATOR = "https://gateway-api-testnet.circle.com";
 const AGON_PAY_TO = process.env.AGON_X402_PAY_TO || "";
 const AGON_PRICE = process.env.AGON_X402_PRICE || "$0.01";
+const AGON_MAX_RESPONSE_BYTES = 65_536;
 
 const okxConfig = {
   apiKey: process.env.OKX_API_KEY || "",
@@ -203,6 +207,8 @@ if (AGON_X402_ENABLED) {
     process.exit(1);
   }
   try {
+    // @circle-fin/x402-batching 3.0.4 server entrypoint, inspected 2026-09-19.
+    // Circle seller flow: https://developers.circle.com/gateway/nanopayments/quickstarts/seller
     const { createGatewayMiddleware } = await import("@circle-fin/x402-batching/server");
     const gateway = createGatewayMiddleware({
       sellerAddress: AGON_PAY_TO,
@@ -217,10 +223,8 @@ if (AGON_X402_ENABLED) {
   }
 }
 
-// Validate before either payment middleware can sign, verify, or deduct anything.
-// The handler keeps the same check as a defense-in-depth guard.
+// Keep the existing OKX lane's validation and payment order unchanged.
 app.use("/x402/memory", validatePaidMemoryRequest);
-app.use("/x402/agon-memory", validatePaidMemoryRequest);
 
 // @okxweb3/x402-express 0.1.1, installed in this service and read on 2026-09-15:
 // its fifth paymentMiddleware argument controls facilitator sync at startup.
@@ -287,11 +291,8 @@ async function servePaidMemory(req, res) {
       body: JSON.stringify(forwarded),
       signal: AbortSignal.timeout(60_000),
     });
-    const text = await upstream.text();
-    res
-      .status(upstream.status)
-      .type(upstream.headers.get("content-type") || "application/json")
-      .send(text);
+    const payload = await readBoundedJson(upstream, AGON_MAX_RESPONSE_BYTES);
+    res.status(upstream.status).json(payload);
   } catch (error) {
     // The buyer paid and we could not deliver. Say so plainly; do not dress a
     // backend outage up as a bad request.
@@ -304,17 +305,7 @@ app.post("/x402/memory", servePaidMemory);
 
 app.post(
   "/x402/agon-memory",
-  (req, res, next) => {
-    if (!requireAgonPayment) {
-      res.status(503).json({ error: "Arc Testnet x402 is not enabled for this provider" });
-      return;
-    }
-    try {
-      Promise.resolve(requireAgonPayment(req, res, next)).catch(next);
-    } catch (error) {
-      next(error);
-    }
-  },
+  createAgonPaymentGate({ requirePayment: requireAgonPayment, validateBody: getPaidMemoryValidationError }),
   servePaidMemory,
 );
 
@@ -330,30 +321,7 @@ app.get("/x402/health", (_req, res) => {
 });
 
 app.get("/agon/manifest.json", (_req, res) => {
-  res.json({
-    version: 1,
-    name: "Agent QA Runtime Memory",
-    description: DESCRIPTION,
-    category: "analysis",
-    endpoint: "https://agentsqa.xyz/x402/agon-memory",
-    logoUrl: "https://agentsqa.xyz/agon/agentqa.png",
-    tags: [
-      "agent-memory",
-      "runtime-memory",
-      "context-memory",
-      "encrypted-memory",
-      "mcp",
-      "walrus",
-      "agent-infrastructure",
-      "recall",
-    ],
-    pricing: { rail: "x402", amountUSDC: AGON_PRICE.replace(/^\$/, "") },
-    execution: {
-      network: AGON_NETWORK,
-      challengeEndpoint: "https://agentsqa.xyz/agon/v1/challenge",
-      externalWrites: false,
-    },
-  });
+  res.json(createAgonManifest(AGON_PRICE));
 });
 
 app.listen(PORT, () => {
